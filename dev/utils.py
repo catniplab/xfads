@@ -1,0 +1,215 @@
+import copy
+import math
+import torch
+import einops
+import numpy as np
+import torch.nn as nn
+import torch.nn.functional as Fn
+
+from dev.linalg_utils import bmv, bip, bop
+from sklearn.linear_model import Ridge
+
+
+class DynamicsGRU(torch.nn.Module):
+    def __init__(self, hidden_dim, latent_dim, device):
+        super(DynamicsGRU, self).__init__()
+        self.device = device
+        self.hidden_dim = hidden_dim
+        self.latent_dim = latent_dim
+
+        self.gru_cell = nn.GRUCell(0, hidden_dim, device=device).to(device)
+        self.h_to_z = nn.Linear(hidden_dim, latent_dim, device=device).to(device)
+        self.z_to_h = nn.Linear(latent_dim, hidden_dim, device=device).to(device)
+
+    def forward(self, z):
+        h_in = self.z_to_h(z)
+        h_in_shape = list(h_in.shape)[:-1]
+        h_in = h_in.reshape((-1, self.hidden_dim))
+
+        empty_vec = torch.empty((h_in.shape[0], 0), device=z.device)
+        h_out = self.gru_cell(empty_vec, h_in)
+        h_out = h_out.reshape(h_in_shape + [self.hidden_dim])
+        z_out = self.h_to_z(h_out)
+        return z_out
+
+
+class ReadoutLatentMask(torch.nn.Module):
+    def __init__(self, n_latents, n_latents_read, device='cpu'):
+        super().__init__()
+
+        self.device = device
+        self.n_latents = n_latents
+        self.n_latents_read = n_latents_read
+
+    def forward(self, z):
+        return z[..., :self.n_latents_read]
+
+    def get_matrix_repr(self):
+        H = torch.zeros((self.n_latents_read, self.n_latents), device=self.device)
+        H[torch.arange(self.n_latents_read), torch.arange(self.n_latents_read)] = 1.0
+        return H
+
+
+class VdpDynamicsModel(nn.Module):
+    def __init__(self, bin_sz=5e-3, mu=1.5, tau_1=0.1, tau_2=0.1):
+        super().__init__()
+
+        self.mu = mu
+        self.tau_1 = tau_1
+        self.tau_2 = tau_2
+        self.bin_sz = bin_sz
+
+    def forward(self, z_t):
+        tau_1_eff = self.bin_sz / self.tau_1
+        tau_2_eff = self.bin_sz / self.tau_2
+
+        z_tp1_d0 = z_t[..., 0] + tau_1_eff * z_t[..., 1]
+        z_tp1_d1 = z_t[..., 1] + tau_2_eff * (self.mu * (1 - z_t[..., 0]**2) * z_t[..., 1] - z_t[..., 0])
+        z_tp1 = torch.concat([z_tp1_d0[..., None], z_tp1_d1[..., None]], dim=-1)
+
+        return z_tp1
+
+
+def build_gru_dynamics_function(dim_input, dim_hidden, d_type=torch.float32, device='cpu'):
+    gru_dynamics = DynamicsGRU(dim_hidden, dim_input, device)
+    return gru_dynamics
+
+
+def softplus_inv(x):
+    return torch.log(torch.exp(x) - 1 + 1e-10)
+
+
+def init_mlp_weights(m):
+    if isinstance(m, nn.Linear):
+        torch.nn.init.kaiming_normal_(m.weight)
+        # torch.nn.init.orthogonal_(m.weight)
+        # torch.nn.init.sparse_(m.weight, sparsity=0.5)
+        try:
+            m.bias.data.fill_(0.0)
+        except:
+            pass
+
+
+def spike_resample_fn(y, resample_factor):
+    arr_re = []
+
+    for arr in y:
+        np_arr_re = np.nan_to_num(arr, copy=False).reshape((arr.shape[0] // resample_factor, resample_factor, -1)).sum(axis=1)
+        arr_re.append(torch.tensor(np_arr_re).unsqueeze(0))
+
+    return torch.concat(arr_re, dim=0)
+
+
+def velocity_resample_fn(y, resample_factor):
+    arr_re = []
+
+    for arr in y:
+        np_arr_re = np.nan_to_num(arr, copy=False).reshape((arr.shape[0] // resample_factor, resample_factor, -1)).mean(axis=1)
+        arr_re.append(torch.tensor(np_arr_re).unsqueeze(0))
+
+    return torch.concat(arr_re, dim=0)
+
+
+def make_2d_rotation_matrix(theta, device='cpu'):
+    A = torch.tensor([[math.cos(theta), -math.sin(theta)],
+                      [math.sin(theta), math.cos(theta)]], device=device)
+
+    return A
+
+
+def pad_mask(mask, data, value):
+    # source: https://github.com/arsedler9/lfads-torch
+
+    """Adds padding to I/O masks for CD and SV in cases where
+    reconstructed data is not the same shape as the input data.
+    """
+    t_forward = data.shape[1] - mask.shape[1]
+    n_heldout = data.shape[2] - mask.shape[2]
+    pad_shape = (0, n_heldout, 0, t_forward)
+    return Fn.pad(mask, pad_shape, value=value)
+
+
+def sample_gauss_z(mean_fn, Q_diag, m_0, Q_0_diag, n_trials, n_time_bins):
+    # input dim: (trial x time x n_inputs)
+    # z_t = A @ z_{t-1} + v_t, v_t ~ N(0, Q)
+    device = Q_diag.device
+    n_latents = Q_diag.shape[-1]
+    z = torch.zeros((n_trials, n_time_bins, n_latents), device=device)
+
+    for t in range(n_time_bins):
+        if t == 0:
+            z[:, 0] = m_0 + torch.sqrt(Q_0_diag) * torch.randn_like(z[:, 0])
+        else:
+            z[:, t] = mean_fn(z[:, t-1]) + torch.sqrt(Q_diag) * torch.randn_like(z[:, t-1])
+
+    return z
+
+
+def evaluate_nlb_veloc_r2(cfg, ssm_nlb, train_dataloader, valid_dataloader, data_metadata, device):
+    n_neurons_enc = data_metadata['n_neurons_enc']
+    n_time_bins_enc = data_metadata['n_time_bins_enc']
+
+    clf = Ridge(alpha=0.01)
+    # clf = GridSearchCV(Ridge(), {"alpha": np.logspace(-4, 0, 9)})
+    train_veloc = []
+    valid_veloc = []
+    train_rates = []
+    valid_rates = []
+
+    with torch.no_grad():
+        ssm_nlb.eval()
+
+        for dx, batch in enumerate(train_dataloader):
+            if dx == 0:
+                n_neurons = batch[0].shape[-1]
+
+            y_obs = batch[0]
+            z_s_prd, stats_prd = ssm_nlb.predict(y_obs[..., :n_time_bins_enc, :n_neurons_enc].to(device), cfg.n_samples)
+            train_rates.append(torch.exp(stats_prd['log_rate'][:, :n_time_bins_enc]))
+            train_veloc.append(batch[1])
+
+        for dx, batch in enumerate(valid_dataloader):
+            y_obs = batch[0]
+            z_s_prd, stats_prd = ssm_nlb.predict(y_obs[..., :n_time_bins_enc, :n_neurons_enc].to(device), cfg.n_samples)
+            valid_rates.append(torch.exp(stats_prd['log_rate'][:, :n_time_bins_enc]))
+            valid_veloc.append(batch[1])
+
+    train_rates = torch.cat(train_rates, dim=0)
+    valid_rates = torch.cat(valid_rates, dim=0)
+    train_veloc = torch.cat(train_veloc, dim=0)
+    valid_veloc = torch.cat(valid_veloc, dim=0)
+
+    clf.fit(train_rates.reshape(-1, n_neurons).cpu(), train_veloc.reshape(-1, 2).cpu())
+
+    score = {}
+    score['r2_train'] = clf.score(train_rates.reshape(-1, n_neurons).cpu(), train_veloc.reshape(-1, 2).cpu())
+    score['r2_valid'] = clf.score(valid_rates.reshape(-1, n_neurons).cpu(), valid_veloc.reshape(-1, 2).cpu())
+
+    return score
+
+
+def get_updated_base_cfg(ray_cfg):
+    base_cfg = ray_cfg["base_cfg"]
+    cfg = copy.deepcopy(base_cfg)
+
+    """set cfg values"""
+    hyper_str = ''
+
+    for k, v in ray_cfg.items():
+        if k != 'base_cfg' and k != 'cwd':
+            cfg[k] = ray_cfg[k]
+
+            if isinstance(v, float):
+                hyper_str += f'_{k}={v:.3f}'
+            else:
+                hyper_str += f'_{k}={v}'
+
+    return cfg, hyper_str
+
+
+class FanInLinear(nn.Linear):
+    # source: https://github.com/arsedler9/lfads-torch
+    def reset_parameters(self):
+        super().reset_parameters()
+        nn.init.normal_(self.weight, std=1 / math.sqrt(self.in_features))
+        nn.init.constant_(self.bias, 0.0)
