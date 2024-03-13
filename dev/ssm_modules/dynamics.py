@@ -1,6 +1,6 @@
-import utils
 import torch
 import torch.nn as nn
+import dev.utils as utils
 
 
 class DenseGaussianDynamics(nn.Module):
@@ -17,14 +17,15 @@ class DenseGaussianDynamics(nn.Module):
         else:
             self.log_Q = torch.nn.Parameter(utils.softplus_inv(Q_diag))
 
+
 class DenseGaussianInitialCondition(nn.Module):
-    def __init__(self, n_latents, m0, Q_0_diag, device='cpu', fix_Q_0=False):
+    def __init__(self, n_latents, m_0, Q_0_diag, device='cpu', fix_Q_0=False):
         super(DenseGaussianInitialCondition, self).__init__()
         self.device = device
         self.n_latents = n_latents
-        self.m0 = torch.nn.Parameter(m0).to(self.device)
+        self.m_0 = torch.nn.Parameter(m_0).to(self.device)
 
         if fix_Q_0:
-            self.log_v0 = utils.softplus_inv(Q_0_diag)
+            self.log_Q_0 = utils.softplus_inv(Q_0_diag)
         else:
-            self.log_v0 = torch.nn.Parameter(utils.softplus_inv(Q_0_diag)).to(device)
+            self.log_Q_0 = torch.nn.Parameter(utils.softplus_inv(Q_0_diag)).to(device)

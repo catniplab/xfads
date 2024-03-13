@@ -240,8 +240,8 @@ class NonlinearFilter(nn.Module):
 
         for t in range(n_time_bins):
             if t == 0:
-                m_0 = self.initial_c_pdf.m0
-                P_p_diag = Fn.softplus(self.initial_c_pdf.log_v0)
+                m_0 = self.initial_c_pdf.m_0
+                P_p_diag = Fn.softplus(self.initial_c_pdf.log_Q_0)
                 z_f_t, m_f_t, m_p_t, Psi_f_t, P_p_diag = fast_filter_step_0(m_0, k[:, 0], K[:, 0], P_p_diag, n_samples)
 
                 if get_kl:

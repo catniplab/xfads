@@ -143,8 +143,8 @@ class NonlinearFilter(nn.Module):
 
         for t in range(n_time_bins):
             if t == 0:
-                m_0 = self.initial_c_pdf.m0
-                Q_0_diag = Fn.softplus(self.initial_c_pdf.log_v0)
+                m_0 = self.initial_c_pdf.m_0
+                Q_0_diag = Fn.softplus(self.initial_c_pdf.log_Q_0)
                 Psi_p_t = torch.zeros((n_trials, n_samples, n_samples), device=k_y.device)
 
                 z_f_t, m_f_t, m_p_t, Psi_f_t, h_f_t = fast_filter_step_0(m_0, k_y[:, 0], K_y[:, 0], Q_0_diag, n_samples)
