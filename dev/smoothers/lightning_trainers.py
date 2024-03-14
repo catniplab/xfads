@@ -35,11 +35,10 @@ class LightningNonlinearSSM(lightning.LightningModule):
     def training_step(self, batch, batch_idx):
         y = batch[0]
 
-        # p_mask_a_t = self.p_mask_a
+        p_mask_y_in_t = self.p_mask_y_in
         p_mask_b_t = self.p_mask_b * (1 + math.cos(2 * math.pi * self.current_epoch / 17.)) / 2.0
         p_mask_a_t = self.p_mask_a * (1 + math.cos(2 * math.pi * self.current_epoch / 20.)) / 2.0
         p_mask_apb_t = self.p_mask_apb * (1 + math.cos(2 * math.pi * self.current_epoch / 23.)) / 2.0
-        p_mask_y_in_t = self.p_mask_y_in
 
         loss, z_s, stats = self.ssm(y, self.n_samples, p_mask_a=p_mask_a_t, p_mask_apb=p_mask_apb_t,
                                     p_mask_y_in=p_mask_y_in_t, p_mask_b=p_mask_b_t)
@@ -51,7 +50,7 @@ class LightningNonlinearSSM(lightning.LightningModule):
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
 
-        log_Q_min = utils.softplus_inv(1e-2)
+        log_Q_min = utils.softplus_inv(1e-3)
         log_Q_0_min = utils.softplus_inv(1e-1)
 
         self.ssm.dynamics_mod.log_Q.data = torch.clip(self.ssm.dynamics_mod.log_Q.data, min=log_Q_min)
@@ -87,17 +86,18 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
         n_time_bins_enc = self.ssm.n_time_bins_enc
 
         l2_C = self.l2_C
+        p_mask_y_in_t = self.p_mask_y_in
+
         p_mask_b_t = self.p_mask_b * (1 + math.cos(2 * math.pi * self.current_epoch / 17.)) / 2.0
         p_mask_a_t = self.p_mask_a * (1 + math.cos(2 * math.pi * self.current_epoch / 20.)) / 2.0
         p_mask_apb_t = self.p_mask_apb * (1 + math.cos(2 * math.pi * self.current_epoch / 23.)) / 2.0
-        p_mask_y_in_t = self.p_mask_y_in
 
         loss, z_s, stats = self.ssm(y_obs, self.n_samples, p_mask_a=p_mask_a_t, p_mask_apb=p_mask_apb_t,
                                     p_mask_y_in=p_mask_y_in_t, p_mask_b=p_mask_b_t, use_cd=self.use_cd, l2_C=l2_C)
 
         with torch.no_grad():
             self.ssm.eval()
-            z_s_prd, stats_prd = self.ssm.predict(y_obs[...,:n_time_bins_enc, :n_neurons_enc], self.n_samples)
+            z_s_prd, stats_prd = self.ssm.predict(y_obs[..., :n_time_bins_enc, :n_neurons_enc], self.n_samples)
             self.ssm.train()
 
             bps_enc = prob_utils.bits_per_spike(stats_prd['log_rate'][..., :n_neurons_enc],

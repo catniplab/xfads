@@ -55,8 +55,8 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
 
         k_y, K_y = self.local_encoder(y_in)
-        k_y = t_mask_a[..., None] * k_y / (1 - p_mask_a)
-        K_y = t_mask_a[..., None, None] * K_y / (1 - p_mask_a)
+        k_y = t_mask_a[..., None] * k_y
+        K_y = t_mask_a[..., None, None] * K_y
 
         z_s, stats = self.nl_filter(k_y, K_y, n_samples, get_kl=get_kl, get_v=get_v)
         stats['t_mask_y_in'] = t_mask_y_in
@@ -84,40 +84,20 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
 
         k_y, K_y = self.local_encoder(y_in)
-        k_y = t_mask_a[..., None] * k_y / (1 - p_mask_a)
-        K_y = t_mask_a[..., None, None] * K_y / (1 - p_mask_a)
+        k_y = t_mask_a[..., None] * k_y
+        K_y = t_mask_a[..., None, None] * K_y
 
         k_b, K_b = self.backward_encoder(k_y, K_y)
-        k_b = t_mask_b[..., None] * k_b / (1 - p_mask_b)
-        K_b = t_mask_b[..., None, None] * K_b / (1 - p_mask_b)
+        k_b = t_mask_b[..., None] * k_b
+        K_b = t_mask_b[..., None, None] * K_b
 
         k = k_b + k_y
         K = torch.concat([K_b, K_y], dim=-1)
-        k = t_mask_apb[..., None] * k / (1 - p_mask_apb)
-        K = t_mask_apb[..., None, None] * K / (1 - p_mask_apb)
+        k = t_mask_apb[..., None] * k
+        K = t_mask_apb[..., None, None] * K
 
         z_s, stats = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v)
         stats['t_mask_y_in'] = t_mask_y_in
-
-        # k_y, K_y = self.local_encoder(y_in)
-        # k_b, K_b = self.backward_encoder(k_y, K_y)
-        # K = torch.concat([K_b, K_y], dim=-1)
-        # k = k_b + k_y
-        #
-        # z_s, stats = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v)
-        # stats['t_mask_y_in'] = t_mask_y_in
-        #
-        # k_y = t_mask_a[..., None] * k_y
-        # K_y = t_mask_a[..., None, None] * K_y
-        # k_b = t_mask_b[..., None] * k_b
-        # K_b = t_mask_b[..., None, None] * K_b
-        #
-        # k = k_b + k_y
-        # K = torch.concat([K_b, K_y], dim=-1)
-        # k = t_mask_apb[..., None] * k
-        # K = t_mask_apb[..., None, None] * K
-        #
-        # z_s, _ = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v)
 
         return z_s, stats
 
@@ -185,14 +165,10 @@ class LrSSMcoBPS(LowRankNonlinearStateSpaceModel):
             ell_enc = self.likelihood_pdf.get_ell(y_obs[:, :self.n_time_bins_enc], z_enc).mean(dim=0)
 
         C = self.likelihood_pdf.readout_fn[-1].weight
-        loss_s = stats['kl'] / (1 - p_mask_apb) - ell_enc
+        loss_s = stats['kl'] - ell_enc
         loss_s = loss_s.sum(dim=-1).mean()
         loss_s += l2_C * C.pow(2).sum()
         stats['ell'] = ell_enc
-
-        # z_pf = self.predict_forward(z_enc[:, :, -1], n_time_bins_obs - n_time_bins_enc)
-        # ell_pf = self.likelihood_pdf.get_ell_no_reduce(y_obs[:, n_time_bins_enc:], z_pf).mean(dim=0)
-        # loss_pf = -ell_pf.sum(dim=-1).mean()
 
         return loss_s, z_enc, stats
 
@@ -212,7 +188,7 @@ class LrSSMcoBPS(LowRankNonlinearStateSpaceModel):
 
         z_enc_f, stats_f = self.fast_filter_1_to_T(y_obs, n_samples, p_mask_y_in=p_mask_y_in, p_mask_a=p_mask_a, get_kl=True)
         ell_enc_f = self.likelihood_pdf.get_ell(y_obs, z_enc_f).mean(dim=0)
-        loss_f = stats_f['kl'] / (1 - p_mask_a) - ell_enc_f
+        loss_f = stats_f['kl'] - ell_enc_f
         loss_f = loss_f.sum(dim=-1).mean()
 
         return loss_f, z_enc_f, stats_f
@@ -224,7 +200,7 @@ class LrSSMcoBPS(LowRankNonlinearStateSpaceModel):
 
         z_s, stats = self.fast_smooth_1_to_T(y_enc, n_samples, get_kl=True)
 
-        # expected log rate or log expected rate
+        # expected log rate
         log_rate_hat = math.log(self.likelihood_pdf.delta) + self.likelihood_pdf.readout_fn(stats['m_f'])
         stats['log_rate'] = log_rate_hat
         return z_s, stats

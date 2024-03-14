@@ -57,12 +57,12 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
 
         k_y, K_y = self.local_encoder(y_in)
-        k_y = t_mask_a[..., None] * k_y / (1 - p_mask_a)
-        K_y = t_mask_a[..., None, None] * K_y / (1 - p_mask_a)
+        k_y = t_mask_a[..., None] * k_y
+        K_y = t_mask_a[..., None, None] * K_y
 
         k_b, K_b = self.backward_encoder(k_y, K_y)
-        k_b = t_mask_b[..., None] * k_b / (1 - p_mask_b)
-        K_b = t_mask_b[..., None, None] * K_b / (1 - p_mask_b)
+        k_b = t_mask_b[..., None] * k_b
+        K_b = t_mask_b[..., None, None] * K_b
 
         z_s, stats = self.nl_filter(k_y, K_y, k_b, K_b, n_samples, get_kl=get_kl)
         return z_s, stats
@@ -126,7 +126,6 @@ class NonlinearFilter(nn.Module):
                 get_kl: bool=False,
                 p_mask: float=0.0):
 
-        # mask data, 0: data available, 1: data missing
         n_trials, n_time_bins, n_latents, rank_y = K_y.shape
 
         kl = []
@@ -372,7 +371,6 @@ def fast_bmv_P_s_0(Psi_f, Psi_s, K_b, K_y, Q_0_diag, v):
     return u
 
 
-
 def fast_update_filtering_to_smoothing_stats_0(z_f, h_f, m_f, Psi_f, k_b, K_b, K_y, Q_0_diag):
     n_trials, n_latents, rank = K_b.shape
     I_r = torch.eye(rank, device=z_f.device)
@@ -454,7 +452,6 @@ def fast_predict_step(m_theta_z_tm1, Q_diag):
     M_c = sqrt_S_inv * (m_theta_z_tm1 - m_p.unsqueeze(-1))
 
     M_c_mT_Q_inv = M_c.mT * (1 / Q_diag)
-    # I_pl_MmTQinvM_chol = torch.linalg.cholesky(I_S + M_c_mT_Q_inv @ M_c)
     I_pl_MmTQinvM_chol, _ = torch.linalg.cholesky_ex(I_S + M_c_mT_Q_inv @ M_c)
     Psi_p = linalg_utils.triangular_inverse(I_pl_MmTQinvM_chol).mT
     h_p = fast_bmv_P_p_inv(Q_diag, M_c, Psi_p, m_p)
