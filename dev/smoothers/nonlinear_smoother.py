@@ -99,6 +99,26 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         z_s, stats = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v)
         stats['t_mask_y_in'] = t_mask_y_in
 
+        # k_y, K_y = self.local_encoder(y_in)
+        # k_b, K_b = self.backward_encoder(k_y, K_y)
+        # K = torch.concat([K_b, K_y], dim=-1)
+        # k = k_b + k_y
+        #
+        # z_s, stats = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v)
+        # stats['t_mask_y_in'] = t_mask_y_in
+        #
+        # k_y = t_mask_a[..., None] * k_y
+        # K_y = t_mask_a[..., None, None] * K_y
+        # k_b = t_mask_b[..., None] * k_b
+        # K_b = t_mask_b[..., None, None] * K_b
+        #
+        # k = k_b + k_y
+        # K = torch.concat([K_b, K_y], dim=-1)
+        # k = t_mask_apb[..., None] * k
+        # K = t_mask_apb[..., None, None] * K
+        #
+        # z_s, _ = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v)
+
         return z_s, stats
 
     def predict_forward(self,
