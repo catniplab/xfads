@@ -71,7 +71,7 @@ def main():
     seq_vae = LightningNlbNonlinearSSM(ssm, cfg)
     csv_logger = CSVLogger('logs/', name=f'r_y_{cfg.rank_local}_r_b_{cfg.rank_backward}', version='noncausal')
     ckpt_callback = ModelCheckpoint(save_top_k=3, monitor='val_bps_hld', mode='max', dirpath='models/',
-                                    filename='{epoch:0}_{val_bps_hld:.3f}_{valid_veloc_r2:.3f}', save_last=True)
+                                    filename='{epoch:0}_{val_bps_hld:.3f}_{val_veloc_r2:.3f}', save_last=True)
 
     trainer = lightning.Trainer(max_epochs=cfg.n_epochs,
                                 gradient_clip_val=1.0,

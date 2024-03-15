@@ -4,6 +4,8 @@ import dev.utils as utils
 import dev.prob_utils as prob_utils
 import pytorch_lightning as lightning
 
+from sklearn.linear_model import Ridge
+
 
 class LightningNonlinearSSM(lightning.LightningModule):
     def __init__(self, ssm, cfg):
