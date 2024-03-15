@@ -33,7 +33,7 @@ There are several configuration settings that can be configured to trade off exp
 9. use_cd: (bool) whether to use the coordinated dropout technique of [Keshtkaran and Pandarinath, 2019](https://arxiv.org/abs/1908.07896) -- in which case `p_mask_y_in` specifies the coordinated dropout rate
 
 Setting `p_mask_a` is equivalent to masking *actual* observations, $y_t$; this strategy was used in the context of structured VAE's for linear dynamical systems in [Zhao, and Linderman. 2023](https://arxiv.org/abs/2305.16543) to promote learning dynamics more adept at prediction (and thus generating more realistic data).  Setting `p_mask_b` is equivalent to masking `pseudo` observations, $\tilde{y}_t$ -- this helps to regularize both the local/backward encoders required.
-
+Ω
 ### example configuration
 LSVS was designed with custom configurations in mind so that depending on the problem, `dynamics_mod`, `initial_c_pdf`, `likelihood_pdf`, `local_encoder`, and `backward_encoder` can be configured as desired.  We include some general classes in `ssm_modules/encoders`, `ssm_modules/likelihoods` and `ssm_modules/dynamics` that should be sufficient for a wide range of problems.  Below is an example configuration.
 ```
@@ -70,3 +70,14 @@ LSVS was designed with custom configurations in mind so that depending on the pr
 
 ### acknowledgements
 Structure of the code and configuration management was heavily inspired by the excellently written `lfads-torch` package at [https://github.com/arsedler9/lfads-torch](https://github.com/arsedler9/lfads-torch) as described in [Sedler and Pandarinath, 2023](https://arxiv.org/abs/2309.01230).
+
+For neural latents benchmark experiments, we use reformatted versions of the mc_maze_small, mc_maze_medium, and mc_maze large datasets.
+
+mc_maze_small:
+Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Small: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0408) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000140/0.220113.0408
+
+mc_maze_medium:
+Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Medium: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0408) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000139/0.220113.0408
+
+mc_maze_large:
+Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Large: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0407) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000138/0.220113.0407

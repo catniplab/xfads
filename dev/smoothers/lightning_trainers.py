@@ -135,8 +135,17 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.ssm.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
         return optimizer
+
+    def optimizer_step(self, *args, **kwargs):
+        super().optimizer_step(*args, **kwargs)
+
+        log_Q_min = utils.softplus_inv(1e-3)
+        log_Q_0_min = utils.softplus_inv(1e-1)
+
+        self.ssm.dynamics_mod.log_Q.data = torch.clip(self.ssm.dynamics_mod.log_Q.data, min=log_Q_min)
+        self.ssm.initial_c_pdf.log_Q_0.data = torch.clip(self.ssm.initial_c_pdf.log_Q_0.data, min=log_Q_0_min)
 
     def on_validation_epoch_end(self):
         if self.current_epoch < 1:

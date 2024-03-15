@@ -20,10 +20,8 @@ class GaussianLikelihood(nn.Module):
     def get_ell(self, y, z):
         mean = self.readout_fn(z)
         cov = Fn.softplus(self.log_R)
-
-        pdf = torch.distributions.Normal(mean, torch.sqrt(cov))
-        log_p_y = pdf.log_prob(y).sum(dim=-1)
-
+        log_prob = -0.5 * ((y - mean)**2 / cov + torch.log(cov) + math.log(2 * math.pi))
+        log_p_y = log_prob.sum(dim=-1)
         return log_p_y
 
 
