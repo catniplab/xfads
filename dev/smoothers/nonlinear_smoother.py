@@ -49,7 +49,7 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         n_trials, n_time_bins, n_neurons = y.shape
         device = y.device
 
-        t_mask_y_in = torch.bernoulli((1 - p_mask_y_in) * torch.ones((n_trials, 1, n_neurons), device=device))
+        t_mask_y_in = torch.bernoulli((1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons), device=device))
         t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=device))
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
@@ -120,9 +120,9 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         return z_forward
 
 
-class LrSSMcoBPS(LowRankNonlinearStateSpaceModel):
+class LrSSMcoBPSheldinEncoder(LowRankNonlinearStateSpaceModel):
     def __init__(self, dynamics_mod, likelihood_pdf,  initial_c_pdf, backward_encoder, local_encoder, nl_filter,
-                 n_neurons_enc, n_time_bins_enc, device='cpu'):
+                 n_neurons_enc, n_neurons_obs, n_time_bins_enc, p_mask_y_in, device='cpu'):
         super(LowRankNonlinearStateSpaceModel, self).__init__()
 
         self.device = device
@@ -134,6 +134,7 @@ class LrSSMcoBPS(LowRankNonlinearStateSpaceModel):
         self.backward_encoder = backward_encoder
 
         self.n_neurons_enc = n_neurons_enc
+        self.n_neurons_obs = n_neurons_obs
         self.n_time_bins_enc = n_time_bins_enc
 
 
@@ -141,10 +142,10 @@ class LrSSMcoBPS(LowRankNonlinearStateSpaceModel):
     def forward(self,
                 y_obs,
                 n_samples: int,
-                p_mask_y_in: float=0.0,
                 p_mask_apb: float=0.0,
                 p_mask_a: float=0.0,
                 p_mask_b: float=0.0,
+                p_mask_y_in: float=0.0,
                 l2_C: float=1e-1,
                 use_cd=False):
 
@@ -174,31 +175,111 @@ class LrSSMcoBPS(LowRankNonlinearStateSpaceModel):
 
 
     @torch.jit.export
-    def forward_filter(self,
-                y_obs,
+    def predict(self,
                 y_enc,
                 n_samples: int,
                 p_mask_y_in: float=0.0,
+                ):
+
+        z_s, stats = self.fast_smooth_1_to_T(y_enc, n_samples, get_kl=True)
+
+        # expected log rate
+        log_rate_hat = math.log(self.likelihood_pdf.delta) + self.likelihood_pdf.readout_fn(stats['m_f'])
+        stats['log_rate'] = log_rate_hat
+        return z_s, stats
+
+
+class LrSSMcoBPSallEncoder(LowRankNonlinearStateSpaceModel):
+    def __init__(self, dynamics_mod, likelihood_pdf,  initial_c_pdf, backward_encoder, local_encoder, nl_filter,
+                 n_neurons_enc, n_neurons_obs, n_time_bins_enc, device='cpu'):
+        super(LowRankNonlinearStateSpaceModel, self).__init__()
+
+        self.device = device
+        self.nl_filter = nl_filter
+        self.dynamics_mod = dynamics_mod
+        self.local_encoder = local_encoder
+        self.initial_c_pdf = initial_c_pdf
+        self.likelihood_pdf = likelihood_pdf
+        self.backward_encoder = backward_encoder
+
+        self.n_neurons_enc = n_neurons_enc
+        self.n_neurons_obs = n_neurons_obs
+        self.n_time_bins_enc = n_time_bins_enc
+
+    def fast_smooth_1_to_T(self,
+                           y,
+                           n_samples: int,
+                           p_mask_a: float=0.0,
+                           p_mask_apb: float=0.0,
+                           p_mask_y_in: float=0.0,
+                           p_mask_b: float=0.0,
+                           get_kl: bool=False,
+                           get_v: bool=False):
+
+        device = y.device
+        n_trials, n_time_bins, n_neurons = y.shape
+
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=device))
+        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=device))
+        t_mask_apb = torch.bernoulli((1 - p_mask_apb) * torch.ones((n_trials, n_time_bins), device=device))
+        t_mask_y_in = torch.bernoulli((1 - p_mask_y_in) * torch.ones((n_trials, 1, n_neurons), device=device))
+
+        y_in = t_mask_y_in * y / (1 - p_mask_y_in)
+
+        k_y, K_y = self.local_encoder(y_in)
+        k_y = t_mask_a[..., None] * k_y
+        K_y = t_mask_a[..., None, None] * K_y
+
+        k_b, K_b = self.backward_encoder(k_y, K_y)
+        k_b = t_mask_b[..., None] * k_b
+        K_b = t_mask_b[..., None, None] * K_b
+
+        k = k_b + k_y
+        K = torch.concat([K_b, K_y], dim=-1)
+        k = t_mask_apb[..., None] * k
+        K = t_mask_apb[..., None, None] * K
+
+        z_s, stats = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v)
+        stats['t_mask_y_in'] = t_mask_y_in
+
+        return z_s, stats
+
+    @torch.jit.export
+    def forward(self,
+                y_obs,
+                n_samples: int,
                 p_mask_apb: float=0.0,
                 p_mask_a: float=0.0,
                 p_mask_b: float=0.0,
+                l2_C: float=1e-1,
                 use_cd=False):
 
-        _, n_time_bins_obs, n_neurons_obs = y_obs.shape
+        n_trials, _, n_neurons_obs = y_obs.shape
 
-        z_enc_f, stats_f = self.fast_filter_1_to_T(y_obs, n_samples, p_mask_y_in=p_mask_y_in, p_mask_a=p_mask_a, get_kl=True)
-        ell_enc_f = self.likelihood_pdf.get_ell(y_obs, z_enc_f).mean(dim=0)
-        loss_f = stats_f['kl'] - ell_enc_f
-        loss_f = loss_f.sum(dim=-1).mean()
+        z_enc, stats = self.fast_smooth_1_to_T(y_obs[..., :self.n_time_bins_enc, :], n_samples,
+                                               p_mask_y_in=self.p_mask_y_in, p_mask_a=p_mask_a, p_mask_apb=p_mask_apb,
+                                               p_mask_b=p_mask_b, get_kl=True)
 
-        return loss_f, z_enc_f, stats_f
+        ell_enc = self.likelihood_pdf.get_ell(y_obs[:, :self.n_time_bins_enc], z_enc).mean(dim=0)
+        C = self.likelihood_pdf.readout_fn[-1].weight
+        loss_s = stats['kl'] - ell_enc
+        loss_s = loss_s.sum(dim=-1).mean()
+        loss_s += l2_C * C.pow(2).sum()
+        stats['ell'] = ell_enc
+
+        return loss_s, z_enc, stats
+
 
     @torch.jit.export
     def predict(self,
                 y_enc,
-                n_samples: int):
+                n_samples: int,
+                p_mask_y_in: float=0.0):
 
-        z_s, stats = self.fast_smooth_1_to_T(y_enc, n_samples, get_kl=True)
+        n_neurons_heldout = self.n_neurons_obs - self.n_neurons_enc
+        y_heldout = torch.zeros((y_enc.shape[0], y_enc.shape[1], n_neurons_heldout), device=y_enc.device)
+        y_input = torch.cat([y_enc / (1 - p_mask_y_in), y_heldout], dim=-1)
+        z_s, stats = self.fast_smooth_1_to_T(y_input, n_samples, get_kl=True)
 
         # expected log rate
         log_rate_hat = math.log(self.likelihood_pdf.delta) + self.likelihood_pdf.readout_fn(stats['m_f'])

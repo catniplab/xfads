@@ -99,7 +99,8 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
 
         with torch.no_grad():
             self.ssm.eval()
-            z_s_prd, stats_prd = self.ssm.predict(y_obs[..., :n_time_bins_enc, :n_neurons_enc], self.n_samples)
+            z_s_prd, stats_prd = self.ssm.predict(y_obs[..., :n_time_bins_enc, :n_neurons_enc],
+                                                  self.n_samples, self.p_mask_y_in)
             self.ssm.train()
 
             bps_enc = prob_utils.bits_per_spike(stats_prd['log_rate'][..., :n_neurons_enc],
@@ -120,7 +121,8 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
         n_time_bins_enc = self.ssm.n_time_bins_enc
 
         loss, z_s, stats = self.ssm(y_obs, self.n_samples)
-        z_s_prd, stats_prd = self.ssm.predict(y_obs[..., :n_time_bins_enc, :n_neurons_enc], self.n_samples)
+        z_s_prd, stats_prd = self.ssm.predict(y_obs[..., :n_time_bins_enc, :n_neurons_enc],
+                                              self.n_samples, self.p_mask_y_in)
 
         bps_enc = prob_utils.bits_per_spike(stats_prd['log_rate'][..., :n_neurons_enc],
                                             y_obs[..., :n_time_bins_enc, :n_neurons_enc])

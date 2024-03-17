@@ -1,5 +1,5 @@
 # Large Scale Variational Smoothing
-Approximate inference targeted at variational Gaussian state-space models with dense covariance matrix approximations.  For more details, see our paper: [Dowling, Zhao, Park. 2024](https://arxiv.org/abs/2403.01371)
+Approximate inference targeted at variational Gaussian state-space models with dense covariance matrix approximations.  For more details, see our paper: [Dowling, Zhao, Park. 2024](https://arxiv.org/abs/2403.01371) \[7\]
 
 
 ### introduction
@@ -25,14 +25,14 @@ There are several configuration settings that can be configured to trade off exp
 1. n_latents: (int) total number of latent variables
 2. n_latents_read: (int) total number of latent variables accessed by the observation model
 3. rank_local: (int) the rank of the local precision update -- $A(y_t) A(y_t)^{\top}$
-4. rank_backward: (int) the rank of the backward preecision update -- $B(\alpha_{t+1:T}) B(\alpha_{t+1:T})^{\top}$
+4. rank_backward: (int) the rank of the backward precision update -- $B(\alpha_{t+1:T}) B(\alpha_{t+1:T})^{\top}$
 5. p_mask_a: (float) the probability of setting $\alpha_t$ to $0$
 6. p_mask_b: (float) the probability of setting $\beta_t$ to $0$
 7. p_mask_apb: (float) the probability of setting $\tilde{\lambda}_t = \alpha_t + \beta_t$ to $0$
 8. p_mask_y_in: (float) the probability of masking data fed as input to the inference networks
-9. use_cd: (bool) whether to use the coordinated dropout technique of [Keshtkaran and Pandarinath, 2019](https://arxiv.org/abs/1908.07896) -- in which case `p_mask_y_in` specifies the coordinated dropout rate
+9. use_cd: (bool) whether to use the coordinated dropout technique of [Keshtkaran and Pandarinath, 2019](https://arxiv.org/abs/1908.07896) \[4\] -- in which case `p_mask_y_in` specifies the coordinated dropout rate
 
-Setting `p_mask_a` is equivalent to masking *actual* observations, $y_t$; this strategy was used in the context of structured VAE's for linear dynamical systems in [Zhao, and Linderman. 2023](https://arxiv.org/abs/2305.16543) to promote learning dynamics more adept at prediction (and thus generating more realistic data).  Setting `p_mask_b` is equivalent to masking `pseudo` observations, $\tilde{y}_t$ -- this helps to regularize both the local/backward encoders required.
+Setting `p_mask_a` is equivalent to masking *actual* observations, $y_t$; this strategy was used in the context of structured VAE's for linear dynamical systems in [Zhao, and Linderman. 2023](https://arxiv.org/abs/2305.16543) \[5\] to promote learning dynamics more adept at prediction (and thus generating more realistic data).  Setting `p_mask_b` is equivalent to masking `pseudo` observations, $\tilde{y}_t$ -- this helps to regularize both the local/backward encoders required.
 Ω
 ### example configuration
 LSVS was designed with custom configurations in mind so that depending on the problem, `dynamics_mod`, `initial_c_pdf`, `likelihood_pdf`, `local_encoder`, and `backward_encoder` can be configured as desired.  We include some general classes in `ssm_modules/encoders`, `ssm_modules/likelihoods` and `ssm_modules/dynamics` that should be sufficient for a wide range of problems.  Below is an example configuration.
@@ -68,16 +68,24 @@ LSVS was designed with custom configurations in mind so that depending on the pr
 ```
 
 
-### acknowledgements
-Structure of the code and configuration management was heavily inspired by the excellently written `lfads-torch` package at [https://github.com/arsedler9/lfads-torch](https://github.com/arsedler9/lfads-torch) as described in [Sedler and Pandarinath, 2023](https://arxiv.org/abs/2309.01230).
+### acknowledgements and references
+Structure of the code and configuration management was heavily inspired by the excellently written `lfads-torch` package at [https://github.com/arsedler9/lfads-torch](https://github.com/arsedler9/lfads-torch) as described in [Sedler and Pandarinath, 2023](https://arxiv.org/abs/2309.01230) \[6\].
 
-For neural latents benchmark experiments, we use reformatted versions of the mc_maze_small, mc_maze_medium, and mc_maze large datasets.
+For neural latents benchmark experiments, we use reformatted versions of the mc_maze_small \[1\], mc_maze_medium \[2\], and mc_maze large \[3\] datasets.
 
 mc_maze_small:
-Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Small: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0408) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000140/0.220113.0408
+\[1\] Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Small: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0408) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000140/0.220113.0408
 
 mc_maze_medium:
-Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Medium: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0408) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000139/0.220113.0408
+\[2\] Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Medium: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0408) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000139/0.220113.0408
 
 mc_maze_large:
-Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Large: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0407) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000138/0.220113.0407
+\[3\] Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Large: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0407) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000138/0.220113.0407
+
+\[4\] Keshtkaran, Mohammad Reza, and Chethan Pandarinath. "Enabling hyperparameter optimization in sequential autoencoders for spiking neural data." Advances in neural information processing systems 32 (2019).
+
+\[5\] Zhao, Yixiu, and Scott Linderman. "Revisiting structured variational autoencoders." International Conference on Machine Learning. PMLR, 2023.
+
+\[6\] Sedler, Andrew R., and Chethan Pandarinath. "lfads-torch: A modular and extensible implementation of latent factor analysis via dynamical systems." arXiv preprint arXiv:2309.01230 (2023).
+
+\[7\] Dowling, Matthew, Yuan Zhao, and Il Memming Park. "Large-scale variational Gaussian state-space models." arXiv preprint arXiv:2403.01371 (2024).

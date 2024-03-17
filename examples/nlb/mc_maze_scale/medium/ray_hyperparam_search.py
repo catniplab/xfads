@@ -18,7 +18,8 @@ from dev.utils import evaluate_nlb_veloc_r2, get_updated_base_cfg
 from dev.ssm_modules.likelihoods import PoissonLikelihood
 from dev.ssm_modules.dynamics import DenseGaussianDynamics
 from dev.ssm_modules.dynamics import DenseGaussianInitialCondition
-from dev.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPS
+from dev.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPSheldinEncoder, LrSSMcoBPSallEncoder
+# from dev.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPS
 from dev.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
 
 from ray import tune
@@ -78,8 +79,8 @@ def build_model(ray_cfg, n_neurons_obs, n_neurons_enc, n_time_bins_enc):
     nl_filter = NonlinearFilter(dynamics_mod, initial_condition_pdf, device=cfg.device)
 
     """sequence vae"""
-    ssm = LrSSMcoBPS(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder, local_encoder, nl_filter,
-                     n_neurons_enc, n_time_bins_enc, device=cfg.device)
+    ssm = LrSSMcoBPSallEncoder(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder, local_encoder,
+                               nl_filter, n_neurons_enc, n_neurons_obs, n_time_bins_enc, device=cfg.device)
 
     return ssm
 
@@ -160,7 +161,8 @@ def train_ssm(ray_cfg, data_dir=None, print_frq=10):
                 y_obs, vel_obs = y_obs.to(device), vel_obs.to(device)
 
                 loss, z_s, stats = ssm(y_obs, cfg.n_samples)
-                z_s_prd, stats_prd = ssm.predict(y_obs[..., :n_time_bins_enc, :n_neurons_enc], cfg.n_samples)
+                z_s_prd, stats_prd = ssm.predict(y_obs[..., :n_time_bins_enc, :n_neurons_enc],
+                                                 cfg.n_samples, cfg.p_mask_y_in)
 
                 val_loss += loss.cpu().numpy()
                 val_bps_enc = prob_utils.bits_per_spike(stats_prd['log_rate'][..., :n_neurons_enc],
@@ -210,13 +212,20 @@ def main():
         "base_cfg": cfg,
         "cwd": os.getcwd(),
 
-        "p_mask_a": tune.uniform(0.0, 0.4),
-        "p_mask_b": tune.uniform(0.0, 0.5),
-        "p_mask_apb": tune.loguniform(0.0, 0.5),
-        "p_mask_y_in": tune.loguniform(0.0, 0.5),
-        "p_local_dropout": tune.loguniform(1e-3, 0.5),
-        "rank_local": tune.randint(3, 30),
-        "rank_backward": tune.randint(1, 20)
+        "n_latents": tune.randint(35, 40),
+        "n_latents_unread": tune.randint(5, 10),
+
+        "l2_C": tune.loguniform(1e-3, 1),
+        "lr": tune.loguniform(1e-4, 1e-2),
+        "Q_init": tune.uniform(1e-1, 1.0),
+
+        "p_mask_a": tune.uniform(0.0, 0.75),
+        "p_mask_b": tune.uniform(0.0, 0.15),
+        "p_mask_apb": tune.uniform(0.0, 0.15),
+        "p_local_dropout": tune.uniform(0.2, 0.5),
+
+        "rank_local": tune.randint(10, 30),
+        "rank_backward": tune.randint(5, 20),
     }
 
     scheduler = ASHAScheduler(
@@ -236,7 +245,7 @@ def main():
         keep_checkpoints_num=3)
 
     # --- save best configs --- #
-    best_trial = result.get_best_trial("val_bps_hld", "max", "last")
+    best_trial = result.get_best_trial("val_bps_hld", "max", "all")
     print(f"Best trial final validation heldout bps: {best_trial.last_result['val_bps_hld']}")
 
     metric_mode_map = {'val_loss': 'min',
@@ -245,7 +254,7 @@ def main():
 
     for metric, mode in metric_mode_map.items():
         with open(f"config_ray_{metric}.yaml", "w") as f:
-            best_trial = result.get_best_trial(metric, mode, "last")
+            best_trial = result.get_best_trial(metric, mode, "all")
             base_cfg_best, _ = get_updated_base_cfg(best_trial.config)
             OmegaConf.save(base_cfg_best, f)
 

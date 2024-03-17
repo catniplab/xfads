@@ -104,7 +104,7 @@ class LrSSMcoBPS(LowRankNonlinearStateSpaceModel):
         z_s, stats = self.fast_smooth_1_to_T(y_enc, n_samples, p_mask=0.0, get_kl=True)
 
         # expected log rate or log expected rate
-        log_rate_hat = math.log(self.likelihood_pdf.delta) +  self.likelihood_pdf.readout_fn(stats['m_s'])
+        log_rate_hat = math.log(self.likelihood_pdf.delta) + self.likelihood_pdf.readout_fn(stats['m_s'])
         stats['log_rate'] = log_rate_hat
         return z_s, stats
 
