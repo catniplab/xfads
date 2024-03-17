@@ -14,7 +14,14 @@ from dev.ssm_modules.likelihoods import GaussianLikelihood
 from dev.smoothers.lightning_trainers import LightningNonlinearSSM
 from dev.ssm_modules.dynamics import DenseGaussianInitialCondition
 from dev.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
-from dev.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
+from dev.smoothers.nonlinear_smoother_causal import NonlinearFilter, LowRankNonlinearStateSpaceModel
+# from dev.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
+
+# from dev.smoothers.nonlinear_smoother_diagonal import NonlinearFilter
+# from dev.ssm_modules.encoders import LocalEncoderDiagonal as LocalEncoderLRMvn
+# from dev.ssm_modules.encoders import BackwardEncoderDiagonal as BackwardEncoderLRMvn
+# from dev.smoothers.nonlinear_smoother_diagonal import DiagonalNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModel
+
 
 
 def main():
@@ -77,11 +84,11 @@ def main():
 
     loss, z, stats = seq_vae.ssm(y_valid, cfg.n_samples)
 
-    for i in range(10):
-        fig, axs = plt.subplots()
-        axs.plot(stats['m_f'][i, :, 0].detach().numpy(), color='red', alpha=0.4)
-        axs.plot(z_valid[i, :, 0].detach().numpy(), color='black', alpha=0.8)
-        fig.show()
+    n_ex = 10
+    fig, axs = plt.subplots(n_ex, 1, figsize=(5, 8))
+    [axs[i].plot(stats['m_f'][i, :, 0].detach().numpy(), color='red', alpha=0.4) for i in range(n_ex)]
+    [axs[i].plot(z_valid[i, :, 0].detach().numpy(), color='black', alpha=0.8) for i in range(n_ex)]
+    fig.show()
 
     fig, axs = plt.subplots()
     plot_utils.plot_two_d_vector_field(seq_vae.ssm.dynamics_mod.mean_fn, axs)

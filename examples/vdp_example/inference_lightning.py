@@ -13,7 +13,14 @@ from dev.ssm_modules.likelihoods import GaussianLikelihood
 from dev.smoothers.lightning_trainers import LightningNonlinearSSM
 from dev.ssm_modules.dynamics import DenseGaussianInitialCondition
 from dev.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
-from dev.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
+# from dev.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
+from dev.smoothers.nonlinear_smoother_causal import NonlinearFilter, LowRankNonlinearStateSpaceModel
+
+# from dev.smoothers.nonlinear_smoother_diagonal import NonlinearFilter
+# from dev.ssm_modules.encoders import LocalEncoderDiagonal as LocalEncoderLRMvn
+# from dev.ssm_modules.encoders import BackwardEncoderDiagonal as BackwardEncoderLRMvn
+# from dev.smoothers.nonlinear_smoother_diagonal import DiagonalNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModel
+
 
 
 def main():
@@ -72,8 +79,8 @@ def main():
                                           local_encoder, nl_filter, device=cfg.device)
 
     """lightning"""
-    # seq_vae = LightningNonlinearSSM(ssm, cfg)
-    seq_vae = LightningNonlinearSSM.load_from_checkpoint('ckpts/epoch=493_valid_loss=19762.875-v1.ckpt', ssm=ssm, cfg=cfg)
+    seq_vae = LightningNonlinearSSM(ssm, cfg)
+    # seq_vae = LightningNonlinearSSM.load_from_checkpoint('ckpts/epoch=471_valid_loss=14513.6044921875.ckpt', ssm=ssm, cfg=cfg)
 
     csv_logger = CSVLogger('logs/', name=f'r_y_{cfg.rank_local}_r_b_{cfg.rank_backward}', version='noncausal')
     ckpt_callback = ModelCheckpoint(save_top_k=3, monitor='valid_loss', mode='min', dirpath='ckpts/',

@@ -73,13 +73,10 @@ Structure of the code and configuration management was heavily inspired by the e
 
 For neural latents benchmark experiments, we use reformatted versions of the mc_maze_small \[1\], mc_maze_medium \[2\], and mc_maze large \[3\] datasets.
 
-mc_maze_small:\
 \[1\] Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Small: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0408) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000140/0.220113.0408
 
-mc_maze_medium:\
 \[2\] Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Medium: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0408) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000139/0.220113.0408
 
-mc_maze_large:\
 \[3\] Churchland, Mark; Kaufman, Matthew (2022) MC_Maze_Large: macaque primary motor and dorsal premotor cortex spiking activity during delayed reaching (Version 0.220113.0407) [Data set]. DANDI archive. https://doi.org/10.48324/dandi.000138/0.220113.0407
 
 \[4\] Keshtkaran, Mohammad Reza, and Chethan Pandarinath. "Enabling hyperparameter optimization in sequential autoencoders for spiking neural data." Advances in neural information processing systems 32 (2019).

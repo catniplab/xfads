@@ -1,6 +1,7 @@
 # --- graphical model --- #
 n_latents: 40
 n_latents_read: 30
+n_latents_unread: 10
 
 rank_local: 10
 rank_backward: 5
@@ -15,11 +16,11 @@ n_hidden_local: 512
 n_hidden_backward: 128
 
 # --- hyperparameters --- #
-use_cd: True
+use_cd: False
 p_mask_a: 0.5
 p_mask_b: 0.1
 p_mask_apb: 0.1
-p_mask_y_in: 0.3
+p_mask_y_in: 0.25
 p_local_dropout: 0.5
 p_backward_dropout: 0.0
 

@@ -11,7 +11,7 @@ from dev.ssm_modules.likelihoods import PoissonLikelihood
 from dev.ssm_modules.dynamics import DenseGaussianDynamics
 from dev.ssm_modules.dynamics import DenseGaussianInitialCondition
 from dev.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
-from dev.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPS
+from dev.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPSheldinEncoder, LrSSMcoBPSallEncoder
 from dev.smoothers.lightning_trainers import LightningNlbNonlinearSSM
 
 
@@ -57,13 +57,14 @@ def main():
     """local/backward encoder"""
     backward_encoder = BackwardEncoderLRMvn(cfg.n_latents_read, cfg.n_hidden_backward, cfg.n_latents, cfg.rank_local,
                                             cfg.rank_backward, device=cfg.device)
-    local_encoder = LocalEncoderLRMvn(cfg.n_latents_read, train_data['n_neurons_enc'], cfg.n_hidden_local, cfg.n_latents,
+    local_encoder = LocalEncoderLRMvn(cfg.n_latents_read, y_train_obs.shape[-1], cfg.n_hidden_local, cfg.n_latents,
                                       cfg.rank_local, device=cfg.device, dropout=cfg.p_local_dropout)
     nl_filter = NonlinearFilter(dynamics_mod, initial_condition_pdf, device=cfg.device)
 
     """sequence vae"""
-    ssm = LrSSMcoBPS(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder, local_encoder, nl_filter,
-                     train_data['n_neurons_enc'], train_data['n_time_bins_enc'], device=cfg.device)
+    ssm = LrSSMcoBPSallEncoder(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder, local_encoder,
+                               nl_filter, train_data['n_neurons_enc'], y_train_obs.shape[-1],
+                               train_data['n_time_bins_enc'], device=cfg.device)
 
     ssm.likelihood_pdf.readout_fn[-1].bias.data = prob_utils.estimate_poisson_rate_bias(y_train_obs, cfg.bin_sz)
 

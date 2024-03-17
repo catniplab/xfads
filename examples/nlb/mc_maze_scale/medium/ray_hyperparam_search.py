@@ -1,5 +1,4 @@
 import os
-import yaml
 import torch
 import tempfile
 import dill as pickle
@@ -19,7 +18,6 @@ from dev.ssm_modules.likelihoods import PoissonLikelihood
 from dev.ssm_modules.dynamics import DenseGaussianDynamics
 from dev.ssm_modules.dynamics import DenseGaussianInitialCondition
 from dev.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPSheldinEncoder, LrSSMcoBPSallEncoder
-# from dev.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPS
 from dev.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
 
 from ray import tune
@@ -74,7 +72,7 @@ def build_model(ray_cfg, n_neurons_obs, n_neurons_enc, n_time_bins_enc):
     """local/backward encoder"""
     backward_encoder = BackwardEncoderLRMvn(cfg.n_latents_read, cfg.n_hidden_backward, cfg.n_latents, cfg.rank_local,
                                             cfg.rank_backward, device=cfg.device)
-    local_encoder = LocalEncoderLRMvn(cfg.n_latents_read, n_neurons_enc, cfg.n_hidden_local, cfg.n_latents,
+    local_encoder = LocalEncoderLRMvn(cfg.n_latents_read, n_neurons_obs, cfg.n_hidden_local, cfg.n_latents,
                                       cfg.rank_local, device=cfg.device, dropout=cfg.p_local_dropout)
     nl_filter = NonlinearFilter(dynamics_mod, initial_condition_pdf, device=cfg.device)
 
@@ -201,11 +199,11 @@ def train_ssm(ray_cfg, data_dir=None, print_frq=10):
 def main():
     cwd = os.getcwd()
     data_path = cwd + '/data/data_{split}_{bin_sz_ms}ms.pt'
-    initialize(version_base=None, config_path="", job_name="mc_maze_medium")
+    initialize(version_base=None, config_path="", job_name="medium")
     cfg = compose(config_name="config")
 
     cpus_per_trial = 3
-    gpus_per_trial = 0.1
+    gpus_per_trial = 0.0
     num_samples = cfg.n_ray_samples
 
     ray_cfg = {
@@ -251,6 +249,8 @@ def main():
     metric_mode_map = {'val_loss': 'min',
                        'val_bps_hld': 'max',
                        'val_r2_veloc': 'max'}
+
+    if not os.path.exists('logs_ray'): os.makedirs('logs_ray')
 
     for metric, mode in metric_mode_map.items():
         with open(f"config_ray_{metric}.yaml", "w") as f:

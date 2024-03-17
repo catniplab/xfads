@@ -122,7 +122,7 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
 
 class LrSSMcoBPSheldinEncoder(LowRankNonlinearStateSpaceModel):
     def __init__(self, dynamics_mod, likelihood_pdf,  initial_c_pdf, backward_encoder, local_encoder, nl_filter,
-                 n_neurons_enc, n_neurons_obs, n_time_bins_enc, p_mask_y_in, device='cpu'):
+                 n_neurons_enc, n_neurons_obs, n_time_bins_enc, device='cpu'):
         super(LowRankNonlinearStateSpaceModel, self).__init__()
 
         self.device = device
@@ -251,13 +251,14 @@ class LrSSMcoBPSallEncoder(LowRankNonlinearStateSpaceModel):
                 p_mask_apb: float=0.0,
                 p_mask_a: float=0.0,
                 p_mask_b: float=0.0,
+                p_mask_y_in: float = 0.0,
                 l2_C: float=1e-1,
                 use_cd=False):
 
         n_trials, _, n_neurons_obs = y_obs.shape
 
         z_enc, stats = self.fast_smooth_1_to_T(y_obs[..., :self.n_time_bins_enc, :], n_samples,
-                                               p_mask_y_in=self.p_mask_y_in, p_mask_a=p_mask_a, p_mask_apb=p_mask_apb,
+                                               p_mask_y_in=p_mask_y_in, p_mask_a=p_mask_a, p_mask_apb=p_mask_apb,
                                                p_mask_b=p_mask_b, get_kl=True)
 
         ell_enc = self.likelihood_pdf.get_ell(y_obs[:, :self.n_time_bins_enc], z_enc).mean(dim=0)
