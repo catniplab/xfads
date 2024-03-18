@@ -134,6 +134,12 @@ def train_ssm(ray_cfg, data_dir=None, print_frq=10):
             loss.backward()
             optimizer.step()
 
+            # --- clip noise if too small --- #
+            log_Q_min = utils.softplus_inv(1e-3)
+            log_Q_0_min = utils.softplus_inv(1e-1)
+            ssm.dynamics_mod.log_Q.data = torch.clip(ssm.dynamics_mod.log_Q.data, min=log_Q_min)
+            ssm.initial_c_pdf.log_Q_0.data = torch.clip(ssm.initial_c_pdf.log_Q_0.data, min=log_Q_0_min)
+
             # --- print statistics --- #
             running_loss += loss.item()
             epoch_steps += 1
@@ -250,7 +256,8 @@ def main():
                        'val_bps_hld': 'max',
                        'val_r2_veloc': 'max'}
 
-    if not os.path.exists('logs_ray'): os.makedirs('logs_ray')
+    if not os.path.exists('logs_ray'):
+        os.makedirs('logs_ray')
 
     for metric, mode in metric_mode_map.items():
         with open(f"config_ray_{metric}.yaml", "w") as f:
