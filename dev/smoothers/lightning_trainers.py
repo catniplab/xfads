@@ -1,4 +1,6 @@
 import math
+import time
+import copy
 import torch
 import dev.utils as utils
 import dev.prob_utils as prob_utils
@@ -23,13 +25,6 @@ class LightningNonlinearSSM(lightning.LightningModule):
 
         self.save_hyperparameters(ignore=['ssm', 'cfg'])
 
-    def validation_step(self, batch, batch_idx):
-        y = batch[0]
-
-        loss, z_s, stats = self.ssm(y, self.n_samples)
-        self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
-        return loss
-
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
         return optimizer
@@ -42,18 +37,28 @@ class LightningNonlinearSSM(lightning.LightningModule):
         p_mask_a_t = self.p_mask_a * (1 + math.cos(2 * math.pi * self.current_epoch / 20.)) / 2.0
         p_mask_apb_t = self.p_mask_apb * (1 + math.cos(2 * math.pi * self.current_epoch / 23.)) / 2.0
 
+        t_start = time.time()
         loss, z_s, stats = self.ssm(y, self.n_samples, p_mask_a=p_mask_a_t, p_mask_apb=p_mask_apb_t,
                                     p_mask_y_in=p_mask_y_in_t, p_mask_b=p_mask_b_t)
+        t_forward = time.time() - t_start
 
-        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("time_forward", t_forward, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        y = batch[0]
+
+        loss, z_s, stats = self.ssm(y, self.n_samples)
+        self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
 
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
 
         log_Q_min = utils.softplus_inv(1e-3)
-        log_Q_0_min = utils.softplus_inv(1e-1)
+        log_Q_0_min = utils.softplus_inv(1e-2)
 
         self.ssm.dynamics_mod.log_Q.data = torch.clip(self.ssm.dynamics_mod.log_Q.data, min=log_Q_min)
         self.ssm.initial_c_pdf.log_Q_0.data = torch.clip(self.ssm.initial_c_pdf.log_Q_0.data, min=log_Q_0_min)
@@ -178,3 +183,314 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
         self.log("train_veloc_r2", r2_train, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("val_veloc_r2", r2_valid, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
+
+class LightningMonkeyReaching(lightning.LightningModule):
+    def __init__(self, ssm, cfg, n_time_bins_enc, n_time_bins_bhv, is_svae=False):
+        super().__init__()
+
+        self.ssm = ssm
+        self.cfg = cfg
+        self.is_svae = is_svae
+        self.n_samples = cfg.n_samples
+
+        self.use_cd = cfg.use_cd
+        self.p_mask_a = cfg.p_mask_a
+        self.p_mask_b = cfg.p_mask_b
+        self.p_mask_apb = cfg.p_mask_apb
+        self.p_mask_y_in = cfg.p_mask_y_in
+
+        self.n_time_bins_enc = n_time_bins_enc
+        self.n_time_bins_bhv = n_time_bins_bhv
+
+        self.save_hyperparameters(ignore=['ssm', 'cfg'])
+
+        self.train_rates_enc = []
+        self.valid_rates_enc = []
+        self.valid_rates_bhv = []
+        self.train_veloc_enc = []
+        self.valid_veloc_enc = []
+        self.valid_veloc_bhv = []
+
+        self.best_r2_enc = -1.0
+        self.best_r2_bhv = -1.0
+        self.best_clf_enc = None
+        self.best_clf_bhv = None
+        self.best_ssm_enc = None
+        self.best_ssm_bhv = None
+
+    def training_step(self, batch, batch_idx):
+        y_obs = batch[0]
+        x_obs = batch[1]
+        n_time_bins_enc = self.n_time_bins_enc
+
+        p_mask_y_in_t = self.p_mask_y_in
+        p_mask_a_t = min(self.p_mask_a, self.current_epoch * self.p_mask_a / 100)
+        p_mask_a_t = p_mask_a_t * (1 + math.cos(2 * math.pi * self.current_epoch / 20.)) / 2.0
+        p_mask_b_t = self.p_mask_b * (1 + math.cos(2 * math.pi * self.current_epoch / 17.)) / 2.0
+        p_mask_apb_t = self.p_mask_apb * (1 + math.cos(2 * math.pi * self.current_epoch / 23.)) / 2.0
+
+        t_start = time.time()
+        loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples, p_mask_a=p_mask_a_t,
+                                    p_mask_apb=p_mask_apb_t, p_mask_y_in=p_mask_y_in_t, p_mask_b=p_mask_b_t)
+
+        t_forward = time.time() - t_start
+
+        with torch.no_grad():
+            log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(dim=0)
+            bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
+
+        self.train_rates_enc.append(log_rate_enc_hat)
+        self.train_veloc_enc.append(x_obs[:, :n_time_bins_enc])
+
+        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("train_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("time_forward", t_forward, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        y_obs = batch[0]
+        x_obs = batch[1]
+        n_time_bins_enc = self.n_time_bins_enc
+
+        loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
+        _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
+        z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
+
+        log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
+            dim=0)
+        log_rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            dim=0)
+
+        bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
+        bps_bhv = prob_utils.bits_per_spike(torch.log(log_rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+
+        self.valid_rates_enc.append(log_rate_enc_hat)
+        self.valid_rates_bhv.append(log_rate_bhv_hat)
+        self.valid_veloc_enc.append(x_obs[:, :n_time_bins_enc])
+
+        self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("valid_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("valid_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        y_obs = batch[0]
+        x_obs = batch[1]
+        n_time_bins_enc = self.n_time_bins_enc
+
+        loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
+
+        _, z_enc, _ = self.best_ssm_enc(y_obs[:, :n_time_bins_enc], self.n_samples)
+        log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
+            dim=0)
+
+        r2_test_enc = self.best_clf_enc.score(log_rate_enc_hat.reshape(-1, log_rate_enc_hat.shape[-1]).cpu(),
+                                              x_obs[:, :n_time_bins_enc].reshape(-1, 2).cpu())
+
+        _, z_bhv_init, _ = self.best_ssm_bhv(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
+        z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
+        log_rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            dim=0)
+
+        r2_test_bhv = self.best_clf_bhv.score(log_rate_bhv_hat.reshape(-1, log_rate_bhv_hat.shape[-1]).cpu(),
+                                              x_obs[:, self.n_time_bins_bhv: n_time_bins_enc].reshape(-1, 2).cpu())
+
+        bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
+        bps_bhv = prob_utils.bits_per_spike(torch.log(log_rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("test_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("test_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("r2_test_enc", r2_test_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("r2_test_bhv", r2_test_bhv, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+        return loss
+
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.993)
+        return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler}}
+
+    def optimizer_step(self, *args, **kwargs):
+        super().optimizer_step(*args, **kwargs)
+
+        log_Q_min = utils.softplus_inv(1e-3)
+        log_Q_0_min = utils.softplus_inv(1e-1)
+
+        with torch.no_grad():
+            self.ssm.dynamics_mod.log_Q.data = torch.clip(self.ssm.dynamics_mod.log_Q.data, min=log_Q_min)
+            self.ssm.initial_c_pdf.log_Q_0.data = torch.clip(self.ssm.initial_c_pdf.log_Q_0.data, min=log_Q_0_min)
+
+            if self.is_svae:
+                F = self.ssm.dynamics_mod.mean_fn.weight.data
+                U, S, VmT = torch.linalg.svd(F, full_matrices=True)
+                self.ssm.dynamics_mod.mean_fn.weight.data = (U * S.clip(max=0.98)) @ VmT
+
+    def on_validation_epoch_end(self):
+        if self.current_epoch == 0:
+            self.log("r2_valid_enc", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log("r2_valid_bhv", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log("r2_train_enc", -1, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+
+        elif self.current_epoch > 1 and self.current_epoch % 3 == 0:
+            n_time_bins_enc = self.n_time_bins_enc
+            train_rates_enc = torch.cat(self.train_rates_enc, dim=0)
+            valid_rates_enc = torch.cat(self.valid_rates_enc, dim=0)
+            valid_rates_bhv = torch.cat(self.valid_rates_bhv, dim=0)
+
+            train_veloc_enc = torch.cat(self.train_veloc_enc, dim=0)
+            valid_veloc_enc = torch.cat(self.valid_veloc_enc, dim=0)
+            valid_veloc_bhv = valid_veloc_enc[:, self.n_time_bins_bhv:self.n_time_bins_enc]
+            _, n_time_bins, n_neurons = train_rates_enc.shape
+
+            clf = Ridge(alpha=0.01)
+            clf.fit(train_rates_enc.reshape(-1, n_neurons).cpu(), train_veloc_enc.reshape(-1, 2).cpu())
+
+            r2_train_enc = clf.score(train_rates_enc.reshape(-1, n_neurons).cpu(), train_veloc_enc.reshape(-1, 2).cpu())
+            r2_valid_enc = clf.score(valid_rates_enc.reshape(-1, n_neurons).cpu(), valid_veloc_enc.reshape(-1, 2).cpu())
+            r2_valid_bhv = clf.score(valid_rates_bhv.reshape(-1, n_neurons).cpu(), valid_veloc_bhv.reshape(-1, 2).cpu())
+
+            if r2_valid_enc >= self.best_r2_enc:
+                print(f'current_epoch: {self.current_epoch}')
+                self.best_clf_enc = copy.deepcopy(clf)
+                self.best_ssm_enc = copy.deepcopy(self.ssm)
+            if r2_valid_bhv >= self.best_r2_bhv:
+                self.best_clf_bhv = copy.deepcopy(clf)
+                self.best_ssm_bhv = copy.deepcopy(self.ssm)
+
+            self.log("r2_train_enc", r2_train_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log("r2_valid_enc", r2_valid_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log("r2_valid_bhv", r2_valid_bhv, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+        self.train_rates_enc = []
+        self.valid_rates_enc = []
+        self.valid_rates_bhv = []
+
+        self.train_veloc_enc = []
+        self.valid_veloc_enc = []
+
+
+class LightningDMFCRSG(lightning.LightningModule):
+    def __init__(self, ssm, cfg, n_time_bins_enc, n_time_bins_bhv, is_svae=False):
+        super().__init__()
+
+        self.ssm = ssm
+        self.cfg = cfg
+        self.is_svae = is_svae
+        self.n_samples = cfg.n_samples
+
+        self.use_cd = cfg.use_cd
+        self.p_mask_a = cfg.p_mask_a
+        self.p_mask_b = cfg.p_mask_b
+        self.p_mask_apb = cfg.p_mask_apb
+        self.p_mask_y_in = cfg.p_mask_y_in
+
+        self.n_time_bins_enc = n_time_bins_enc
+        self.n_time_bins_bhv = n_time_bins_bhv
+
+        self.save_hyperparameters(ignore=['ssm', 'cfg'])
+
+        self.best_bps_enc = -1.0
+        self.best_bps_bhv = -1.0
+        self.best_ssm_enc = None
+        self.best_ssm_bhv = None
+
+    def training_step(self, batch, batch_idx):
+        y_obs = batch[0]
+        n_time_bins_enc = self.n_time_bins_enc
+
+        p_mask_y_in_t = self.p_mask_y_in
+        p_mask_a_t = min(self.p_mask_a, self.current_epoch * self.p_mask_a / 100)
+        p_mask_a_t = p_mask_a_t * (1 + math.cos(2 * math.pi * self.current_epoch / 20.)) / 2.0
+        p_mask_b_t = self.p_mask_b * (1 + math.cos(2 * math.pi * self.current_epoch / 17.)) / 2.0
+        p_mask_apb_t = self.p_mask_apb * (1 + math.cos(2 * math.pi * self.current_epoch / 23.)) / 2.0
+
+        t_start = time.time()
+        loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples, p_mask_a=p_mask_a_t,
+                                    p_mask_apb=p_mask_apb_t, p_mask_y_in=p_mask_y_in_t, p_mask_b=p_mask_b_t)
+
+        t_forward = time.time() - t_start
+
+        with torch.no_grad():
+            log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(dim=0)
+            bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
+
+        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("train_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("time_forward", t_forward, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        y_obs = batch[0]
+        n_time_bins_enc = self.n_time_bins_enc
+
+        loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
+        _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
+        z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
+
+        log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
+            dim=0)
+        log_rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            dim=0)
+
+        bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
+        bps_bhv = prob_utils.bits_per_spike(torch.log(log_rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+
+        if bps_enc >= self.best_bps_enc:
+            print(f'current_epoch: {self.current_epoch}')
+            self.best_ssm_enc = copy.deepcopy(self.ssm)
+        if bps_bhv >= self.best_bps_bhv:
+            self.best_ssm_bhv = copy.deepcopy(self.ssm)
+
+        self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("valid_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("valid_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        y_obs = batch[0]
+        n_time_bins_enc = self.n_time_bins_enc
+
+        loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
+
+        _, z_enc, _ = self.best_ssm_enc(y_obs[:, :n_time_bins_enc], self.n_samples)
+        log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
+            dim=0)
+
+        _, z_bhv_init, _ = self.best_ssm_bhv(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
+        z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
+        log_rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            dim=0)
+
+        bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
+        bps_bhv = prob_utils.bits_per_spike(torch.log(log_rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("test_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("test_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        return loss
+
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.95)
+        return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler, 'monitor': 'valid_bps_enc', 'frequency': 5}}
+
+    def optimizer_step(self, *args, **kwargs):
+        super().optimizer_step(*args, **kwargs)
+
+        log_Q_min = utils.softplus_inv(1e-3)
+        log_Q_0_min = utils.softplus_inv(1e-1)
+
+        with torch.no_grad():
+            self.ssm.dynamics_mod.log_Q.data = torch.clip(self.ssm.dynamics_mod.log_Q.data, min=log_Q_min)
+            self.ssm.initial_c_pdf.log_Q_0.data = torch.clip(self.ssm.initial_c_pdf.log_Q_0.data, min=log_Q_0_min)
+
+            if self.is_svae:
+                F = self.ssm.dynamics_mod.mean_fn.weight.data
+                U, S, VmT = torch.linalg.svd(F, full_matrices=True)
+                self.ssm.dynamics_mod.mean_fn.weight.data = (U * S.clip(max=0.99)) @ VmT

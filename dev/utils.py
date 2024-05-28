@@ -33,6 +33,77 @@ class DynamicsGRU(torch.nn.Module):
         return z_out
 
 
+class DynamicsQuadSaddle(torch.nn.Module):
+    def __init__(self, device):
+        super(DynamicsQuadSaddle, self).__init__()
+
+        self.delta = 0.05
+        self.A_bd = torch.tensor([[-0.99, -0.4], [0.4, -0.99]], device=device)
+        self.A_ul_lr = (torch.tensor([[1., 0.], [0., -1.]], device=device))
+        # self.A_ur_ll = self.A_ul_lr
+        self.A_ur_ll = (torch.tensor([[-1., 0.], [0., 1.]], device=device))
+        # self.A_ur_ll = self.A_ul_lr
+
+        self.z_0_ur = torch.tensor([1., 1.], device=device)
+        self.z_0_lr = torch.tensor([1., -1.], device=device)
+        self.z_0_ul = torch.tensor([-1., 1.], device=device)
+        self.z_0_ll = torch.tensor([-1., -1.], device=device)
+        # self.z_0_ul = 10 * torch.tensor([-1., 1.], device=device)
+        # self.z_0_lr = 10 * torch.tensor([1., -1.], device=device)
+        # self.z_0_ll = 10 * torch.tensor([-1., -1.], device=device)
+
+
+    def forward(self, z):
+        ub = 1.5
+        y = torch.zeros_like(z, device=z.device)
+        z_ur_dx = torch.where((z[..., 0] >= 0) & (z[..., 1] > 0) & (torch.abs(z[..., 0]) < ub) & (torch.abs(z[..., 1]) < ub))
+        z_lr_dx = torch.where((z[..., 0] > 0) & (z[..., 1] <= 0) & (torch.abs(z[..., 0]) < ub) & (torch.abs(z[..., 1]) < ub))
+        z_ul_dx = torch.where((z[..., 0] <= 0) & (z[..., 1] > 0) & (torch.abs(z[..., 0]) < ub) & (torch.abs(z[..., 1]) < ub))
+        z_ll_dx = torch.where((z[..., 0] < 0) & (z[..., 1] <= 0) & (torch.abs(z[..., 0]) < ub) & (torch.abs(z[..., 1]) < ub))
+        z_bd_dx = torch.where((torch.abs(z[..., 0]) > ub) | (torch.abs(z[..., 1]) > ub))
+
+        if z.dim() == 3:
+            y[z_ur_dx[0], z_ur_dx[1]] = bmv(self.A_ur_ll, z[z_ur_dx[0], z_ur_dx[1]] - self.z_0_ur)
+            y[z_lr_dx[0], z_lr_dx[1]] = bmv(self.A_ul_lr, z[z_lr_dx[0], z_lr_dx[1]] - self.z_0_lr)
+            y[z_ul_dx[0], z_ul_dx[1]] = bmv(self.A_ul_lr, z[z_ul_dx[0], z_ul_dx[1]] - self.z_0_ul)
+            y[z_ll_dx[0], z_ll_dx[1]] = bmv(self.A_ur_ll, z[z_ll_dx[0], z_ll_dx[1]] - self.z_0_ll)
+        elif z.dim() == 2:
+            eye = torch.eye(z.shape[-1], device=z.device)
+            y[z_ur_dx[0]] = z[z_ur_dx[0]] + self.delta * bmv(self.A_ur_ll, z[z_ur_dx[0]] - self.z_0_ur)
+            y[z_lr_dx[0]] = z[z_lr_dx[0]] + self.delta * bmv(self.A_ul_lr, z[z_lr_dx[0]] - self.z_0_lr)
+            y[z_ul_dx[0]] = z[z_ul_dx[0]] + self.delta * bmv(self.A_ul_lr, z[z_ul_dx[0]] - self.z_0_ul)
+            y[z_ll_dx[0]] = z[z_ll_dx[0]] + self.delta * bmv(self.A_ur_ll, z[z_ll_dx[0]] - self.z_0_ll)
+            y[z_bd_dx[0]] = z[z_bd_dx[0]] + self.delta * bmv(self.A_bd, z[z_bd_dx[0]])
+
+        # y = bmv(self.A_ul_lr, z)
+
+        return y
+
+
+class MGU(torch.nn.Module):
+    def __init__(self, hidden_dim, latent_dim, device):
+        super(MGU, self).__init__()
+        self.W_f = nn.Linear(latent_dim, hidden_dim, device=device)
+        self.W_h = nn.Linear(hidden_dim, hidden_dim, device=device)
+        self.U_i = nn.Linear(latent_dim, hidden_dim, bias=False, device=device)
+        self.U_o = nn.Linear(hidden_dim, latent_dim, bias=False, device=device)
+        self.log_rho = nn.Parameter(torch.tensor(0.0, device=device))
+
+        self.A = nn.Linear(latent_dim, latent_dim, bias=False, device=device)
+        self.A.weight.data = 0.9 * make_2d_rotation_matrix(math.pi/4, device=device)
+
+    def forward(self, z_tm1):
+        rho = torch.sigmoid(self.log_rho)
+
+        U_i_z = self.U_i(z_tm1)
+        f_t = Fn.sigmoid(self.W_f(z_tm1))
+        h_tilde_t = Fn.tanh(self.W_h(f_t * U_i_z))
+        h_t = (1 - f_t) * U_i_z + f_t * h_tilde_t
+        z_t = rho * self.U_o(h_t) + (1 - rho) * self.A(z_tm1)
+
+        return z_t
+
+
 class ReadoutLatentMask(torch.nn.Module):
     def __init__(self, n_latents, n_latents_read, device='cpu'):
         super().__init__()

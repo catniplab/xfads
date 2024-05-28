@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 
-def plot_two_d_vector_field(dynamics_fn, axs, min_xy=-3, max_xy=3, n_pts=100, device='cpu'):
+def plot_two_d_vector_field(dynamics_fn, axs, min_xy=-3, max_xy=3, n_pts=500, device='cpu'):
     with torch.no_grad():
         x = np.linspace(min_xy, max_xy, n_pts)
         y = np.linspace(min_xy, max_xy, n_pts)
