@@ -43,3 +43,65 @@ def bits_per_spike(preds, targets):
         reduction="sum",
     )
     return (nll_null - nll_model) / torch.nansum(targets) / math.log(2)
+
+
+def rts_smoother(m_p, P_p, m_f, P_f, F):
+    device = m_p.device
+    n_trials, n_time_bins, n_latents = m_p.shape
+
+    m_s = [None] * n_time_bins
+    P_s = [None] * n_time_bins
+
+    m_s[-1] = m_f[:, -1]
+    P_s[-1] = P_f[:, -1]
+
+    for t in range(n_time_bins - 2, -1, -1):
+        P_p_chol = torch.linalg.cholesky(P_p[:, t+1])
+        G = P_f[:, t] @ torch.cholesky_solve(F, P_p_chol).mT
+
+        m_s[t] = m_f[:, t] + bmv(G, m_s[t+1] - m_p[:, t+1])
+        P_s[t] = P_f[:, t] + G @ (P_s[t+1] - P_p[:, t+1]) @ G.mT
+
+    m_s = torch.stack(m_s, dim=1)
+    P_s = torch.stack(P_s, dim=1)
+
+    return m_s, P_s
+
+
+def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
+    device = k.device
+    n_trials, n_time_bins, n_latents = k.shape
+
+    Q_0 = torch.diag(Q_0_diag)
+    Q = torch.diag(Q_diag)
+
+    m_p = []
+    m_f = []
+    P_f = []
+    P_p = []
+
+    for t in range(n_time_bins):
+        if t == 0:
+            m_p.append(m_0 * torch.ones([n_trials, n_latents], device=device))
+            P_p.append(Q_0 * torch.ones([n_trials, n_latents, n_latents], device=device))
+        else:
+            m_p.append(bmv(F, m_f[t-1]))
+            P_p.append(F @ P_f[t-1] @ F.T + Q)
+
+        P_p_chol = torch.linalg.cholesky(P_p[t])
+        h_p = torch.cholesky_solve(m_p[t].unsqueeze(-1), P_p_chol).squeeze(-1)
+        h_f_t = h_p + k[:, t]
+        J_f_t = torch.cholesky_inverse(P_p_chol) + K[:, t]
+        J_f_t_chol = torch.linalg.cholesky(J_f_t)
+        m_f_t = torch.cholesky_solve(h_f_t.unsqueeze(-1), J_f_t_chol).squeeze(-1)
+        P_f_t = torch.cholesky_inverse(J_f_t_chol)
+
+        m_f.append(m_f_t)
+        P_f.append(P_f_t)
+
+    m_f = torch.stack(m_f, dim=1)
+    P_f = torch.stack(P_f, dim=1)
+    m_p = torch.stack(m_p, dim=1)
+    P_p = torch.stack(P_p, dim=1)
+
+    return m_f, P_f, m_p, P_p

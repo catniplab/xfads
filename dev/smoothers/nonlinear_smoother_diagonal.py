@@ -32,7 +32,7 @@ class DiagonalNonlinearStateSpaceModel(nn.Module):
                                              p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True)
 
         ell = self.likelihood_pdf.get_ell(y, z_s).mean(dim=0)
-        kl = trajectory_kl(stats['m_f'], stats['P_f'], stats['m_p'], stats['P_p'])
+        kl = trajectory_kl_diagonal_dense(stats['m_f'], stats['P_f'], stats['m_p'], stats['P_p_chol'])
 
         loss = kl - ell
         loss = loss.sum(dim=-1).mean()
@@ -143,34 +143,34 @@ class NonlinearFilter(nn.Module):
         m_f = []
         P_f = []
         m_p = []
-        P_p = []
+        P_p_chol = []
 
         z_f = []
         stats = {}
 
-        Q_diag = Fn.softplus(self.dynamics_mod.log_Q)
+        Q_diag = Fn.softplus(self.dynamics_mod.log_Q.to(k.device))
 
         for t in range(n_time_bins):
             if t == 0:
-                m_0 = self.initial_c_pdf.m_0
-                P_p_diag = Fn.softplus(self.initial_c_pdf.log_Q_0)
-                z_f_t, m_f_t, m_p_t, P_f_t, P_p_t = filter_step_0(m_0, k[:, 0], K[:, 0], P_p_diag, n_samples)
+                m_0 = self.initial_c_pdf.m_0.to(k.device)
+                P_p_diag = Fn.softplus(self.initial_c_pdf.log_Q_0.to(k.device))
+                z_f_t, m_f_t, m_p_t, P_f_t, P_p_chol_t = filter_step_0(m_0, k[:, 0], K[:, 0], P_p_diag, n_samples)
 
             else:
                 m_fn_z_tm1 = self.dynamics_mod.mean_fn(z_f[t-1]).movedim(0, -1)
-                z_f_t, m_f_t, m_p_t, P_f_t, P_p_t = filter_step_t(m_fn_z_tm1, k[:, t], K[:, t], Q_diag)
+                z_f_t, m_f_t, m_p_t, P_f_t, P_p_chol_t = filter_step_t(m_fn_z_tm1, k[:, t], K[:, t], Q_diag)
 
             m_f.append(m_f_t)
             P_f.append(P_f_t)
             m_p.append(m_p_t)
-            P_p.append(P_p_t)
             z_f.append(z_f_t)
+            P_p_chol.append(P_p_chol_t)
 
         z_f = torch.stack(z_f, dim=2)
         stats['m_f'] = torch.stack(m_f, dim=1)
         stats['m_p'] = torch.stack(m_p, dim=1)
         stats['P_f'] = torch.stack(P_f, dim=1)
-        stats['P_p'] = torch.stack(P_p, dim=1)
+        stats['P_p_chol'] = torch.stack(P_p_chol, dim=1)
 
         return z_f, stats
 
@@ -180,22 +180,25 @@ def trajectory_kl(m_f, P_f, m_p, P_p):
     return kl.sum(dim=-1)
 
 
+def trajectory_kl_diagonal_dense(m_f, P_f, m_p, P_p_chol):
+    L = m_p.shape[-1]
+
+    diff = m_p - m_f
+    qp = bip(diff, chol_bmv_solve(P_p_chol, diff))
+    tr = torch.sum(torch.diagonal(torch.cholesky_inverse(P_p_chol), dim1=-2, dim2=-1) * P_f, dim=-1)
+    logdet_p = 2 * torch.sum(torch.log(torch.diagonal(P_p_chol, dim1=-2, dim2=-1) + 1e-8), dim=-1)
+    logdet_f = torch.sum(torch.log(P_f), dim=-1)
+
+    kl = 0.5 * (tr + qp + logdet_p - logdet_f - L)
+    return kl
+
+
 def predict_step_t(m_theta_z_tm1, Q_diag):
     M = -0.5 * (torch.diag(Q_diag) + bop(m_theta_z_tm1, m_theta_z_tm1))
 
     m_p = m_theta_z_tm1.mean(dim=0)
     M_p = M.mean(dim=0)
     P_p = -2 * M_p - bop(m_p, m_p)
-    P_p = torch.diagonal(P_p, dim1=-2, dim2=-1)
-
-    # m_theta_z_tm1_alt = m_theta_z_tm1.movedim(0, -1)
-    # S = m_theta_z_tm1_alt.shape[-1]
-    # sqrt_S_inv = math.sqrt(1 / S)
-    #
-    # m_p_alt = m_theta_z_tm1_alt.mean(dim=-1)
-    # M_c = sqrt_S_inv * (m_theta_z_tm1_alt - m_p_alt.unsqueeze(-1))
-    # P_p_alt = M_c @ M_c.mT + torch.diag(Q_diag)
-
     return m_p, P_p
 
 
@@ -207,18 +210,19 @@ def filter_step_t(m_theta_z_tm1, k, K, Q_diag):
 
     w_f = torch.randn([n_samples] + batch_sz + [n_latents], device=device)
     m_p, P_p = predict_step_t(m_theta_z_tm1.movedim(-1, 0), Q_diag)
-    J_p = 1 / P_p
+    P_p_chol = torch.linalg.cholesky(P_p)
 
-    h_p = J_p * m_p
+    # h_p = chol_bmv_solve(P_p_chol, m_p)
+    h_p = (1 / torch.diagonal(P_p, dim1=-2, dim2=-1)) * m_p
     h_f = h_p + k
 
-    J_f = J_p + K
+    J_f = (1 / torch.diagonal(P_p, dim1=-2, dim2=-1)) + K
     P_f = 1 / J_f
     m_f = P_f * h_f
 
     z_f = m_f + torch.sqrt(P_f) * w_f
 
-    return z_f, m_f, m_p, P_f, P_p
+    return z_f, m_f, m_p, P_f, P_p_chol
 
 
 # @torch.jit.script
@@ -238,9 +242,6 @@ def filter_step_0(m_0: torch.Tensor, k: torch.Tensor, K: torch.Tensor, P_0_diag:
     z_f = m_f + torch.sqrt(P_f) * w_f
 
     m_p = m_0 * torch.ones_like(m_f).to(m_0.device)
-    P_p = P_0_diag * torch.ones_like(m_f).to(m_0.device)
+    P_p_chol = torch.diag(torch.sqrt(P_0_diag)) * torch.ones(list(m_f.shape) + [n_latents]).to(m_0.device)
 
-    return z_f, m_f, m_p, P_f, P_p
-
-
-
+    return z_f, m_f, m_p, P_f, P_p_chol
