@@ -17,7 +17,6 @@ class LocalEncoderLRMvn(nn.Module):
                                  nn.Dropout(dropout),
                                  nn.Linear(hidden_size, (rank + 1) * n_latents, device=device)).to(device)
 
-
     def forward(self, y):
         h_log_J = self.mlp(y)
         h = h_log_J[..., :self.n_latents]
