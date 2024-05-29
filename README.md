@@ -36,7 +36,7 @@ Setting `p_mask_a` is equivalent to masking *actual* observations, $y_t$; this s
 
 ### Installation
 1. Install miniconda or anaconda
-This is just to leverage `conda` for managing the python environment. You can still use the IDE or code editor of your choise.
+This is just to leverage `conda` for managing the python environment. You can still use the IDE or code editor of your choise.\
 In case of using Google Colab, to be able to use ```conda``` commands, you have to install ```condacolab```
 In a cell, run:
 ```
