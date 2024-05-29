@@ -37,11 +37,6 @@ Setting `p_mask_a` is equivalent to masking *actual* observations, $y_t$; this s
 ### Installation
 1. Install miniconda or anaconda
 This is just to leverage `conda` for managing the python environment. You can still use the IDE or code editor of your choise.\
-In case of using Google Colab, to be able to use ```conda``` commands, you have to install ```condacolab```\
-In a cell, run:
-```
-!pip install -q condacolab
-```
 2. Clone this repo
    ```
    git clone https://github.com/catniplab/xfads
@@ -55,6 +50,12 @@ In a cell, run:
    ```
    pip install -e .
    ```
+Note:
+In case of using Google Colab, to be able to use ```conda``` commands, you have to install ```condacolab```\
+In a cell, run:
+```
+!pip install -q condacolab
+```
    
 ### example configuration
 LSVS was designed with custom configurations in mind so that depending on the problem, `dynamics_mod`, `initial_c_pdf`, `likelihood_pdf`, `local_encoder`, and `backward_encoder` can be configured as desired.  We include some general classes in `ssm_modules/encoders`, `ssm_modules/likelihoods` and `ssm_modules/dynamics` that should be sufficient for a wide range of problems.  Below is an example configuration.
