@@ -36,7 +36,7 @@ Setting `p_mask_a` is equivalent to masking *actual* observations, $y_t$; this s
 
 ### Installation
 1. Install miniconda or anaconda
-This is just to leverage `conda` for managing the python environment. You can still use the IDE or code editor of your choise.\
+This is just to leverage `conda` for managing the python environment. You can still use the IDE or code editor of your choise.
 2. Clone this repo
    ```
    git clone https://github.com/catniplab/xfads
