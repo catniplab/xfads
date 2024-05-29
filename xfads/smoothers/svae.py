@@ -2,9 +2,9 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as Fn
-import dev.linalg_utils as linalg_utils
-from dev.linalg_utils import bmv, bip, chol_bmv_solve
-import dev.prob_utils as prob_utils
+import xfads.linalg_utils as linalg_utils
+from xfads.linalg_utils import bmv, bip, chol_bmv_solve
+import xfads.prob_utils as prob_utils
 
 
 class SVAE(nn.Module):

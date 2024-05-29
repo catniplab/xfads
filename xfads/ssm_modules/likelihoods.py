@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-import dev.utils as utils
+import xfads.utils as utils
 import torch.nn.functional as Fn
 
 

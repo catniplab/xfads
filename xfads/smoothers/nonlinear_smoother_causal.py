@@ -2,8 +2,8 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as Fn
-import dev.linalg_utils as linalg_utils
-from dev.linalg_utils import bmv, bip, chol_bmv_solve
+import xfads.linalg_utils as linalg_utils
+from xfads.linalg_utils import bmv, bip, chol_bmv_solve
 
 
 def full_rank_mvn_kl(m_f, P_f_chol, m_p, P_p_chol):

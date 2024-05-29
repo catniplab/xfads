@@ -6,7 +6,7 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as Fn
 
-from dev.linalg_utils import bmv, bip, bop
+from xfads.linalg_utils import bmv, bip, bop
 from sklearn.linear_model import Ridge
 
 

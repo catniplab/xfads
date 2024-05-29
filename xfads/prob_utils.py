@@ -2,7 +2,7 @@ import math
 import torch
 
 from torch.nn.functional import poisson_nll_loss
-from dev.linalg_utils import bip, bop, bmv, bqp, chol_bmv_solve
+from xfads.linalg_utils import bip, bop, bmv, bqp, chol_bmv_solve
 
 
 def estimate_poisson_rate_bias(y, time_delta):

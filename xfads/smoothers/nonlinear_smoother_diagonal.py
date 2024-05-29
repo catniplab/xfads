@@ -2,8 +2,8 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as Fn
-import dev.linalg_utils as linalg_utils
-from dev.linalg_utils import bmv, bop, bip, chol_bmv_solve
+import xfads.linalg_utils as linalg_utils
+from xfads.linalg_utils import bmv, bop, bip, chol_bmv_solve
 
 
 class DiagonalNonlinearStateSpaceModel(nn.Module):

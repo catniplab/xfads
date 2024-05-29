@@ -3,22 +3,22 @@ import torch
 import tempfile
 import dill as pickle
 import torch.nn as nn
-import dev.utils as utils
+import xfads.utils as utils
 import torch.optim as optim
 import ray.cloudpickle as pickle
 import pytorch_lightning as lightning
 
-from dev import prob_utils
+from xfads import prob_utils
 from functools import partial
 from omegaconf import OmegaConf
 from hydra import compose, initialize
-from dev.utils import evaluate_nlb_veloc_r2, get_updated_base_cfg
+from xfads.utils import evaluate_nlb_veloc_r2, get_updated_base_cfg
 
-from dev.ssm_modules.likelihoods import PoissonLikelihood
-from dev.ssm_modules.dynamics import DenseGaussianDynamics
-from dev.ssm_modules.dynamics import DenseGaussianInitialCondition
-from dev.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPSheldinEncoder, LrSSMcoBPSallEncoder
-from dev.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
+from xfads.ssm_modules.likelihoods import PoissonLikelihood
+from xfads.ssm_modules.dynamics import DenseGaussianDynamics
+from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
+from xfads.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPSheldinEncoder, LrSSMcoBPSallEncoder
+from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
 
 from ray import tune
 from ray import train

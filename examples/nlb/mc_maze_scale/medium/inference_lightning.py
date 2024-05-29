@@ -1,18 +1,18 @@
 import torch
-import dev.utils as utils
+import xfads.utils as utils
 import matplotlib.pyplot as plt
-import dev.prob_utils as prob_utils
+import xfads.prob_utils as prob_utils
 import pytorch_lightning as lightning
 
 from hydra import compose, initialize
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from dev.ssm_modules.likelihoods import PoissonLikelihood
-from dev.ssm_modules.dynamics import DenseGaussianDynamics
-from dev.ssm_modules.dynamics import DenseGaussianInitialCondition
-from dev.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
-from dev.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPSheldinEncoder, LrSSMcoBPSallEncoder
-from dev.smoothers.lightning_trainers import LightningNlbNonlinearSSM
+from xfads.ssm_modules.likelihoods import PoissonLikelihood
+from xfads.ssm_modules.dynamics import DenseGaussianDynamics
+from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
+from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
+from xfads.smoothers.nonlinear_smoother import NonlinearFilter, LrSSMcoBPSheldinEncoder, LrSSMcoBPSallEncoder
+from xfads.smoothers.lightning_trainers import LightningNlbNonlinearSSM
 
 
 def main():

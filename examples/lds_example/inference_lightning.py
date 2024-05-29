@@ -1,19 +1,19 @@
 import math
 import torch
 import torch.nn as nn
-import dev.utils as utils
+import xfads.utils as utils
 import pytorch_lightning as lightning
 import matplotlib.pyplot as plt
 
 from hydra import compose, initialize
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from dev.ssm_modules.dynamics import DenseGaussianDynamics
-from dev.ssm_modules.likelihoods import GaussianLikelihood
-from dev.smoothers.lightning_trainers import LightningNonlinearSSM
-from dev.ssm_modules.dynamics import DenseGaussianInitialCondition
-from dev.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
-from dev.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
+from xfads.ssm_modules.dynamics import DenseGaussianDynamics
+from xfads.ssm_modules.likelihoods import GaussianLikelihood
+from xfads.smoothers.lightning_trainers import LightningNonlinearSSM
+from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
+from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
+from xfads.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
 
 
 def main():

@@ -8,20 +8,20 @@ os.environ["NUMEXPR_NUM_THREADS"] = "8"  # export NUMEXPR_NUM_THREADS=6
 import math
 import torch
 import torch.nn as nn
-import dev.utils as utils
-import dev.prob_utils as prob_utils
+import xfads.utils as utils
+import xfads.prob_utils as prob_utils
 import pytorch_lightning as lightning
 import matplotlib.pyplot as plt
 
 from hydra import compose, initialize
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from dev.ssm_modules.likelihoods import PoissonLikelihood
-from dev.ssm_modules.dynamics import DenseGaussianDynamics
-from dev.ssm_modules.dynamics import DenseGaussianInitialCondition
-from dev.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
-from dev.smoothers.lightning_trainers import LightningNonlinearSSM, LightningMonkeyReaching
-from dev.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
+from xfads.ssm_modules.likelihoods import PoissonLikelihood
+from xfads.ssm_modules.dynamics import DenseGaussianDynamics
+from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
+from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
+from xfads.smoothers.lightning_trainers import LightningNonlinearSSM, LightningMonkeyReaching
+from xfads.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
 # from dev.smoothers.nonlinear_smoother_causal_debug import NonlinearFilter, LowRankNonlinearStateSpaceModel
 
 
