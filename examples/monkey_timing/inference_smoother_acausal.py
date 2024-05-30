@@ -43,7 +43,7 @@ def main():
         torch.set_default_dtype(torch.float32)
 
         """data"""
-        data_path = 'data/old_data/data_{split}_{bin_sz_ms}ms.pt'
+        data_path = 'data/data_{split}_{bin_sz_ms}ms.pt'
         train_data = torch.load(data_path.format(split='train', bin_sz_ms=cfg.bin_sz_ms))
         val_data = torch.load(data_path.format(split='valid', bin_sz_ms=cfg.bin_sz_ms))
         test_data = torch.load(data_path.format(split='test', bin_sz_ms=cfg.bin_sz_ms))
