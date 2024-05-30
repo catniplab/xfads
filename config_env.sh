@@ -7,9 +7,6 @@ ENV_NAME=$(grep '^name:' environment.yaml | awk '{print $2}')
 ENV_PATH=$(conda env list | grep "${ENV_NAME}" | awk '{print $3}')
 POStACTIVATION_PATH=$ENV_PATH/etc/conda/activate.d
 
-# Print the environment path
-echo "The path to the environment '$ENV_NAME' is: $ENV_PATH"
-
 # Create a directory for the activation script
 mkdir -p $ENV_PATH/etc/conda/activate.d
 
