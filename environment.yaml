@@ -115,4 +115,3 @@ dependencies:
       - typing-extensions==4.11.0
       - yarl==1.9.4
       - zipp==3.18.1
-prefix: /opt/anaconda3/envs/xfads
