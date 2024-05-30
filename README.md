@@ -44,7 +44,7 @@ This is just to leverage `conda` for managing the python environment. You can st
 3. Create Conda environment, and install it's required packages, from `enviroment.yaml`
    Make sure you are in the project directory i.e. same directory as `enviroment.yaml`, and run:
    ```
-   conda env create -f environment.yml
+   conda env create -f environment.yaml
    ```
 5. Add the `xfads` package to the `PYTHONPATH` of the environment
    ```
