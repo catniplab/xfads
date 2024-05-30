@@ -1,8 +1,5 @@
 #!/bin/bash
 
-#Make the ecript executable 
-chmod +x set_pythonpath.sh
-
 # Get the environment name (already specified in environment.yaml)
 ENV_NAME=$(grep '^name:' environment.yaml | awk '{print $2}')
 
