@@ -46,7 +46,7 @@ This is just to leverage `conda` for managing the python environment. You can st
    ```
    conda env create -f environment.yml
    ```
-5. Wrap the package and create a `wheel` for it
+5. Add the `xfads` package to th `PYTHONPATH` of the environment
    ```
    pip install -e .
    ```
