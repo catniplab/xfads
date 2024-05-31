@@ -14,7 +14,25 @@ mkdir -p $ENV_PATH/etc/conda/activate.d
 PROJECT_DIR="$PWD"
 
 # Assign the value of PROJECT_DIR to a txt file
-echo "$PROJECT_DIR" > $POStACTIVATION_PATH/project_dir.txt
+echo "$PROJECT_DIR" > $POStACTIVATION_PATH/set_pythonpath.txt
 
 # Create the post-activation script
-echo 'PYTHONPATH=$(cat "$(dirname "$0")/project_dir.txt")'> $ENV_PATH/etc/conda/activate.d/set_pythonpath.sh
+echo 'PYTHONPATH=$(cat "$(dirname "$0")/set_pythonpath.txt")'> $POStACTIVATION_PATH/set_pythonpath.sh
+
+# Set Pytorch device
+echo '#!/bin/bash' > $POStACTIVATION_PATH/set_pytorch_device.sh
+echo '' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+echo '# Check if CUDA is available' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+echo 'if command -v nvidia-smi &> /dev/null' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+echo 'then' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+echo '    PYTORCH_DEVICE="cuda"' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+echo 'else' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+echo '    PYTORCH_DEVICE="cpu"' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+echo 'fi' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+
+echo '' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+echo '    PYTORCH_ENABLE_MPS_FALLBACK="0"' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+
+echo '' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+echo '    CUDA_VISIBLE_DEVICES=""' >> $POStACTIVATION_PATH/set_pytorch_device.sh
+
