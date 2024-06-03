@@ -2,8 +2,8 @@ import math
 import time
 import copy
 import torch
-import dev.utils as utils
-import dev.prob_utils as prob_utils
+import xfads.utils as utils
+import xfads.prob_utils as prob_utils
 import pytorch_lightning as lightning
 
 from sklearn.linear_model import Ridge

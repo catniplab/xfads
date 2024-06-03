@@ -2,10 +2,10 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as Fn
-import dev.linalg_utils as linalg_utils
+import xfads.linalg_utils as linalg_utils
 
-from dev.utils import pad_mask
-from dev.linalg_utils import bmv, bip, chol_bmv_solve
+from xfads.utils import pad_mask
+from xfads.linalg_utils import bmv, bip, chol_bmv_solve
 
 
 class LowRankNonlinearStateSpaceModel(nn.Module):

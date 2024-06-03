@@ -1,4 +1,4 @@
-# Large Scale Variational Smoothing
+# eXponential Family Dynamical Systems (XFADS): Large-scale nonlinear Gaussian state-space modeling
 Approximate inference targeted at variational Gaussian state-space models with dense covariance matrix approximations.  For more details, see our paper: [Dowling, Zhao, Park. 2024](https://arxiv.org/abs/2403.01371) \[7\]
 
 
@@ -34,6 +34,29 @@ There are several parameters that can be configured to trade off expressivity/sp
 
 Setting `p_mask_a` is equivalent to masking *actual* observations, $y_t$; this strategy was used in the context of structured VAE's for linear dynamical systems in [Zhao, and Linderman. 2023](https://arxiv.org/abs/2305.16543) \[5\] to promote learning dynamics more adept at prediction (and thus generating more realistic data).  Setting `p_mask_b` is equivalent to masking `pseudo` observations, $\tilde{y}_t$ -- this helps to regularize both the local/backward encoders required.
 
+### Installation
+1. Install miniconda or anaconda
+This is just to leverage `conda` for managing the python environment. You can still use the IDE or code editor of your choise.
+2. Clone this repo
+   ```
+   git clone https://github.com/catniplab/xfads
+   ```
+3. Create Conda environment, and install it's required packages, from `enviroment.yaml`
+   Make sure you are in the project directory i.e. same directory as `enviroment.yaml`, and run:
+   ```
+   conda env create -f environment.yaml
+   ```
+5. Add the `xfads` package to the `PYTHONPATH` of the environment
+   ```
+   pip install -e .
+   ```
+Note:
+In case of using Google Colab, to be able to use ```conda``` commands, you have to install ```condacolab```\
+In a cell, run:
+```
+!pip install -q condacolab
+```
+   
 ### example configuration
 LSVS was designed with custom configurations in mind so that depending on the problem, `dynamics_mod`, `initial_c_pdf`, `likelihood_pdf`, `local_encoder`, and `backward_encoder` can be configured as desired.  We include some general classes in `ssm_modules/encoders`, `ssm_modules/likelihoods` and `ssm_modules/dynamics` that should be sufficient for a wide range of problems.  Below is an example configuration.
 ```

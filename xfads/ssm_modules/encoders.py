@@ -17,7 +17,6 @@ class LocalEncoderLRMvn(nn.Module):
                                  nn.Dropout(dropout),
                                  nn.Linear(hidden_size, (rank + 1) * n_latents, device=device)).to(device)
 
-
     def forward(self, y):
         h_log_J = self.mlp(y)
         h = h_log_J[..., :self.n_latents]
@@ -80,7 +79,6 @@ class LocalEncoderDiagonal(nn.Module):
                                  nn.SiLU(),
                                  nn.Dropout(dropout),
                                  nn.Linear(hidden_size, n_latents * 2, device=device)).to(device)
-
 
     def forward(self, y):
         h_log_J = self.mlp(y)
@@ -200,6 +198,7 @@ class LocalEncoderDKF(nn.Module):
         P_diag = Fn.softplus(m_log_P_diag[..., self.n_latents:]).clip(min=1e-3)
 
         return m, P_diag
+
 
 class InitEncoderDKF(nn.Module):
     def __init__(self, hidden_size, n_latents, device='cpu'):

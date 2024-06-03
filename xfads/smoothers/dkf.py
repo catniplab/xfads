@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as Fn
-import dev.prob_utils as prob_utils
+import xfads.prob_utils as prob_utils
 
 
 class dKF(nn.Module):
