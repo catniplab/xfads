@@ -1,28 +1,11 @@
-import os
-os.environ["OMP_NUM_THREADS"] = "8"  # export OMP_NUM_THREADS=4
-os.environ["OPENBLAS_NUM_THREADS"] = "8"  # export OPENBLAS_NUM_THREADS=4
-os.environ["MKL_NUM_THREADS"] = "8"  # export MKL_NUM_THREADS=6
-os.environ["VECLIB_MAXIMUM_THREADS"] = "8"  # export VECLIB_MAXIMUM_THREADS=4
-os.environ["NUMEXPR_NUM_THREADS"] = "8"  # export NUMEXPR_NUM_THREADS=6
-
-import math
 import torch
-import torch.nn as nn
-import xfads.utils as utils
-import xfads.prob_utils as prob_utils
 import pytorch_lightning as lightning
-import matplotlib.pyplot as plt
 
 from hydra import compose, initialize
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from xfads.ssm_modules.likelihoods import PoissonLikelihood
-from xfads.ssm_modules.dynamics import DenseGaussianDynamics
-from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
-from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
-from xfads.smoothers.lightning_trainers import LightningNonlinearSSM, LightningMonkeyReaching
-from xfads.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
-# from dev.smoothers.nonlinear_smoother_causal_debug import NonlinearFilter, LowRankNonlinearStateSpaceModel
+from xfads.smoothers.lightning_trainers import LightningMonkeyReaching
+from xfads.ssm_modules.prebuilt_models import create_xfads_poisson_log_link
 
 
 def main():
@@ -62,33 +45,8 @@ def main():
         valid_dataloader = torch.utils.data.DataLoader(y_val_dataset, batch_size=y_valid_obs.shape[0], shuffle=False)
         test_dataloader = torch.utils.data.DataLoader(y_test_dataset, batch_size=y_valid_obs.shape[0], shuffle=False)
 
-        """likelihood pdf"""
-        H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
-        readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs))
-        readout_fn[-1].bias.data = prob_utils.estimate_poisson_rate_bias(train_dataloader, cfg.bin_sz)
-        likelihood_pdf = PoissonLikelihood(readout_fn, n_neurons_obs, cfg.bin_sz, device=cfg.device)
-
-        """dynamics module"""
-        Q_diag = 1. * torch.ones(cfg.n_latents, device=cfg.device)
-        dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics, device=cfg.device)
-        dynamics_mod = DenseGaussianDynamics(dynamics_fn, cfg.n_latents, Q_diag, device=cfg.device)
-
-        """initial condition"""
-        m_0 = torch.zeros(cfg.n_latents, device=cfg.device)
-        Q_0_diag = 1. * torch.ones(cfg.n_latents, device=cfg.device)
-        initial_condition_pdf = DenseGaussianInitialCondition(cfg.n_latents, m_0, Q_0_diag, device=cfg.device)
-
-        """local/backward encoder"""
-        backward_encoder = BackwardEncoderLRMvn(cfg.n_latents, cfg.n_hidden_backward, cfg.n_latents,
-                                                rank_local=cfg.rank_local, rank_backward=cfg.rank_backward,
-                                                device=cfg.device)
-        local_encoder = LocalEncoderLRMvn(cfg.n_latents, n_neurons_obs, cfg.n_hidden_local, cfg.n_latents, rank=cfg.rank_local,
-                                          device=cfg.device, dropout=cfg.p_local_dropout)
-        nl_filter = NonlinearFilter(dynamics_mod, initial_condition_pdf, device=cfg.device)
-
-        """sequence vae"""
-        ssm = LowRankNonlinearStateSpaceModel(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder,
-                                              local_encoder, nl_filter, device=cfg.device)
+        """create ssm"""
+        ssm = create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader)
 
         """lightning"""
         seq_vae = LightningMonkeyReaching(ssm, cfg, n_time_bins_enc, n_bins_bhv)
@@ -101,8 +59,6 @@ def main():
                                     default_root_dir='lightning/',
                                     callbacks=[ckpt_callback],
                                     logger=csv_logger,
-                                    strategy='ddp',
-                                    accelerator='gpu',
                                     )
 
         trainer.fit(model=seq_vae, train_dataloaders=train_dataloader, val_dataloaders=valid_dataloader)
