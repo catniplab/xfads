@@ -13,7 +13,7 @@ from xfads.ssm_modules.likelihoods import GaussianLikelihood
 from xfads.smoothers.lightning_trainers import LightningNonlinearSSM
 from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
 from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
-from xfads.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
+from xfads.smoothers.nonlinear_smoother import NonlinearFilterSmallL, LowRankNonlinearStateSpaceModel
 
 
 def main():
@@ -66,7 +66,7 @@ def main():
                                             device=cfg.device)
     local_encoder = LocalEncoderLRMvn(cfg.n_latents, n_neurons, cfg.n_hidden_local, cfg.n_latents, rank=cfg.rank_local,
                                       device=cfg.device, dropout=cfg.p_local_dropout)
-    nl_filter = NonlinearFilter(dynamics_mod, initial_condition_pdf, device=cfg.device)
+    nl_filter = NonlinearFilterSmallL(dynamics_mod, initial_condition_pdf, device=cfg.device)
 
     """sequence vae"""
     ssm = LowRankNonlinearStateSpaceModel(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder,

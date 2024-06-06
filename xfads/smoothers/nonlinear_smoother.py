@@ -356,6 +356,8 @@ class NonlinearFilterSmallL(nn.Module):
                 k: torch.Tensor,
                 K: torch.Tensor,
                 n_samples: int,
+                get_v: bool=False,
+                get_kl: bool=False,
                 p_mask: float=0.0):
 
         # mask data, 0: data available, 1: data missing
@@ -372,8 +374,8 @@ class NonlinearFilterSmallL(nn.Module):
 
         for t in range(n_time_bins):
             if t == 0:
-                m_0 = self.initial_c_pdf.m0
-                P_0_diag = Fn.softplus(self.initial_c_pdf.log_v0)
+                m_0 = self.initial_c_pdf.m_0
+                P_0_diag = Fn.softplus(self.initial_c_pdf.log_Q_0)
                 z_f_t, m_f_t, P_f_chol_t, P_p_chol_t = filter_step_0(m_0, k[:, 0], K[:, 0], P_0_diag, n_samples)
                 m_p.append(m_0 * torch.ones(n_trials, n_latents, device=k[:, 0].device))
             else:
