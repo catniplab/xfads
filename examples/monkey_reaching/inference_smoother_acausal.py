@@ -42,7 +42,7 @@ def main():
     test_dataloader = torch.utils.data.DataLoader(y_test_dataset, batch_size=y_valid_obs.shape[0], shuffle=False)
 
     """create ssm"""
-    ssm = create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader)
+    ssm = create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_type='n')
 
     """lightning"""
     seq_vae = LightningMonkeyReaching(ssm, cfg, n_time_bins_enc, n_bins_bhv)

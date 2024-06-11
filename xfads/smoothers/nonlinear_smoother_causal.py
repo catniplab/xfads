@@ -6,16 +6,6 @@ import xfads.linalg_utils as linalg_utils
 from xfads.linalg_utils import bmv, bip, chol_bmv_solve
 
 
-def full_rank_mvn_kl(m_f, P_f_chol, m_p, P_p_chol):
-    tr = torch.einsum('...ii -> ...', torch.cholesky_solve(P_f_chol @ P_f_chol.mT, P_p_chol))
-    logdet1 = 2 * torch.sum(torch.log(torch.diagonal(P_f_chol, dim1=-2, dim2=-1)), dim=-1)
-    logdet2 = 2 * torch.sum(torch.log(torch.diagonal(P_p_chol, dim1=-2, dim2=-1)), dim=-1)
-    qp = bip(m_f - m_p, chol_bmv_solve(P_p_chol, m_f - m_p))
-    kl = 0.5 * (tr + qp + logdet2 - logdet1 - m_f.shape[-1])
-
-    return kl
-
-
 class LowRankNonlinearStateSpaceModel(nn.Module):
     def __init__(self, dynamics_mod, likelihood_pdf,
                  initial_c_pdf, backward_encoder, local_encoder, nl_filter, device='cpu'):
@@ -154,12 +144,6 @@ class NonlinearFilter(nn.Module):
         z_s = []
         Psi_f = []
         Psi_p = []
-
-        m_f__ = []
-        m_p__ = []
-        m_s__ = []
-        z_f__ = []
-        z_s__ = []
 
         Q_diag = Fn.softplus(self.dynamics_mod.log_Q)
         stats = {}
@@ -483,7 +467,6 @@ def fast_update_filtering_to_smoothing_stats_t(z_f, h_f, m_f, Psi_f, M_c_f_p, k_
     z_s = m_s + z_f_c - bmv(K_b, chol_bmv_solve(I_r_pl_triple_chol, v_1))
 
     return m_s, z_s, Psi_s
-
 
 
 # @torch.jit.script
