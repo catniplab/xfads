@@ -5,28 +5,25 @@ n_latents_read: 35
 rank_local: 15
 rank_backward: 5
 
-Q_init: 1e-1
 n_hidden_dynamics: 128
 
 # --- inference network --- #
 n_samples: 25
 n_hidden_local: 256
-n_hidden_backward: 128 # 64 except for dvbf@128
+n_hidden_backward: 128
 
 # --- hyperparameters --- #
 use_cd: False
 p_mask_a: 0.0
-p_mask_a_offset: 0.0
 p_mask_b: 0.0
-p_mask_b_offset: 0.0
 p_mask_apb: 0.0
 p_mask_y_in: 0.0
 p_local_dropout: 0.4
 p_backward_dropout: 0.0
 
 # --- training --- #
-device: 'cuda'
-data_device: 'cuda'
+device: 'cpu'
+data_device: 'cpu'
 
 lr: 1e-3
 n_epochs: 1000
@@ -41,5 +38,3 @@ default_dtype: torch.float32
 
 # --- ray --- #
 n_ray_samples: 10
-
-
