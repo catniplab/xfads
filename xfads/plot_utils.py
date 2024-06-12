@@ -18,3 +18,16 @@ def plot_two_d_vector_field(dynamics_fn, axs, min_xy=-3, max_xy=3, n_pts=500, de
         v = s[:, 1].reshape(Y.shape[0], Y.shape[1])
 
         axs.streamplot(X, Y, u, v, color='black', linewidth=0.5, arrowsize=0.5)
+
+
+def plot_z_samples(fig, axs, samples, color_map_list):
+    n_samples, n_trials, n_bins, n_neurons = samples.shape
+    fig.subplots_adjust(hspace=0)
+    [axs[i].axvline(12, linestyle='--', color='gray') for i in range(n_trials)]
+    [axs[i].axis('off') for i in range(n_trials)]
+    [axs[i].plot(samples[j, i, :, n], color=color_map_list[n](j), linewidth=0.5, alpha=0.4)
+     for i in range(n_trials) for j in range(samples.shape[0]) for n in range(n_neurons)]
+
+    [axs[i].set_xlim(0, n_bins) for i in range(n_trials)]
+    [axs[i].set_ylim(-10, 10) for i in range(n_trials)]
+    fig.tight_layout()
