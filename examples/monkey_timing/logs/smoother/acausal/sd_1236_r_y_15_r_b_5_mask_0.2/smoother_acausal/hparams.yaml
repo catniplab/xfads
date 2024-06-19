@@ -1,0 +1,3 @@
+n_time_bins_enc: 260
+n_time_bins_bhv: 140
+is_svae: false
