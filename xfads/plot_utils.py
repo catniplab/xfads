@@ -31,3 +31,23 @@ def plot_z_samples(fig, axs, samples, color_map_list):
     [axs[i].set_xlim(0, n_bins) for i in range(n_trials)]
     [axs[i].set_ylim(-10, 10) for i in range(n_trials)]
     fig.tight_layout()
+
+
+def plot_spikes(spikes, axs):
+    n_bins = spikes.shape[0]
+    n_neurons = spikes.shape[1]
+
+    # fig, axs = plt.subplots(figsize=(6, 3))
+    _, indices = torch.sort(spikes.mean(dim=0))
+    spikes = spikes[:, indices][..., n_neurons//2:]
+    n_neurons = n_neurons//2
+
+    for n in range(n_neurons):
+        time_ax = np.arange(n_bins)
+        neuron_spikes = spikes[:, n]
+        neuron_spikes[neuron_spikes > 0] = 1
+        neuron_spikes = neuron_spikes * time_ax
+        neuron_spikes = neuron_spikes[neuron_spikes > 0]
+
+        axs.scatter(neuron_spikes, 0.5 * n * np.ones_like(neuron_spikes), marker='o', color='black', s=4,
+                    edgecolors='none')
