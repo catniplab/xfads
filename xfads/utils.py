@@ -287,3 +287,18 @@ class FanInLinear(nn.Linear):
         super().reset_parameters()
         nn.init.normal_(self.weight, std=1 / math.sqrt(self.in_features))
         nn.init.constant_(self.bias, 0.0)
+
+
+def propagate_latent_k_steps(z, dynamics_mod, k_steps):
+    n_samples, n_trials, n_latents = z.shape
+    Q = Fn.softplus(dynamics_mod.log_Q)
+    mean_fn = dynamics_mod.mean_fn
+
+    z_out = torch.zeros((n_samples, n_trials, k_steps + 1, n_latents), dtype=z.dtype).to(z.device)
+    z_out[:, :, 0] = z
+
+    for k in range(1, k_steps+1):
+        z_out[:, :, k] = mean_fn(z_out[:, :, k - 1]) \
+                         + torch.sqrt(Q) * torch.randn_like(z_out[:, :, k - 1]).to(z.device)
+
+    return z_out
