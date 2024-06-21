@@ -1,5 +1,8 @@
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
+
+from matplotlib import cm
 
 
 def plot_two_d_vector_field(dynamics_fn, axs, min_xy=-3, max_xy=3, n_pts=500, device='cpu'):
@@ -51,3 +54,35 @@ def plot_spikes(spikes, axs):
 
         axs.scatter(neuron_spikes, 0.5 * n * np.ones_like(neuron_spikes), marker='o', color='black', s=4,
                     edgecolors='none')
+
+
+def plot_reaching(axs, pos, reach_colors):
+    n_trials, n_bins, _ = pos.shape
+    axs.axis('off')
+
+    for n in range(n_trials):
+        axs.plot(pos[n, :, 0], pos[n, :, 1], color=reach_colors[n])
+
+
+def plot_single_trial_reaching_latents(z):
+    ylim = torch.abs(z).amax(dim=[0, 1])    # max per trial
+    n_samples, n_bins, n_latents = z.shape
+
+    blues = cm.get_cmap("Blues", n_samples)
+    grays = cm.get_cmap("Greys", n_samples)
+
+    with torch.no_grad():
+        fig, ax = plt.subplots(n_latents//4, 4, figsize=(4, 4))
+        ax = ax.flatten()
+        fig.subplots_adjust(hspace=0.0)
+        fig.subplots_adjust(wspace=0.0)
+        [ax[n].axis('off') for n in range(n_latents)]
+
+        for n in range(n_latents):
+            [ax[n].plot(z[s, :, n], color=blues(s), linewidth=0.5) for s in range(n_samples)]
+            ax[n].set_ylim((-ylim[n], ylim[n]))
+            ax[n].set_xlim((0, n_bins))
+
+        fig.tight_layout()
+
+    return fig

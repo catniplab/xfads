@@ -41,5 +41,3 @@ default_dtype: torch.float32
 
 # --- ray --- #
 n_ray_samples: 10
-
-

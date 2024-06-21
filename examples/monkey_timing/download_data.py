@@ -123,7 +123,7 @@ def main():
     ts = torch.stack(ts, dim=0)
     tp = torch.stack(tp, dim=0)
 
-    with open('data/old_data/int_condition_map.yaml', 'w') as outfile:
+    with open('data/int_condition_map.yaml', 'w') as outfile:
         yaml.dump(int_to_verbose_map, outfile, default_flow_style=False)
 
     train_data, valid_data, test_data = {}, {}, {}
