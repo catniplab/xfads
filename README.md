@@ -73,6 +73,7 @@ Now, for simplicity, and to get a grasp of the wheel, it's recommended to go thr
 Then, some real experimental data:
 - `monkey_reaching` Approximating the posterior of the latents and inferring the underlying dynamics of the `mc_maze` dataset.
 - `monkey_timing` similarly, for the `dmfc_rsg` dataset.\
+\
 If you feel comfortable dabbling with XFADS by directly applying it to neural data, you can jump directly to the `monkey_reaching` example
   
 
