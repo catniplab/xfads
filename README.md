@@ -1,4 +1,4 @@
-# eXponential Family Dynamical Systems (XFADS): Large-scale nonlinear Gaussian state-space modeling
+# eXponential FAmily Dynamical Systems (XFADS): Large-scale nonlinear Gaussian state-space modeling
 Approximate inference targeted at variational Gaussian state-space models with dense covariance matrix approximations.  For more details, see our paper: [Dowling, Zhao, Park. 2024](https://arxiv.org/abs/2403.01371) \[7\]
 
 
