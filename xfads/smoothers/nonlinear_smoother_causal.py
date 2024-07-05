@@ -117,6 +117,94 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         return z_forward
 
 
+class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
+    def __init__(self, dynamics_mod, likelihood_pdf,
+                 initial_c_pdf, backward_encoder, local_encoder, nl_filter, device='cpu'):
+        super(LowRankNonlinearStateSpaceModelWithInput, self).__init__(dynamics_mod, likelihood_pdf, initial_c_pdf,
+                                                                       backward_encoder, local_encoder, nl_filter)
+
+    @torch.jit.export
+    def forward(self,
+                y,
+                u,
+                n_samples: int,
+                p_mask_y_in: float = 0.0,
+                p_mask_a: float = 0.0,
+                p_mask_b: float = 0.0,
+                p_mask_apb: float = 0.0):
+
+        z_s, stats = self.fast_smooth_1_to_T(y, u, n_samples, p_mask_y_in=p_mask_y_in,
+                                             p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True)
+
+        ell = self.likelihood_pdf.get_ell(y, z_s).mean(dim=0)
+        loss = stats['kl'] - ell
+        loss = loss.sum(dim=-1).mean()
+        return loss, z_s, stats
+
+    @torch.jit.export
+    def fast_smooth_1_to_T(self,
+                           y,
+                           u,
+                           n_samples: int,
+                           p_mask_a: float = 0.0,
+                           p_mask_y_in: float = 0.0,
+                           p_mask_b: float = 0.0,
+                           get_kl: bool = False,
+                           get_v: bool = False):
+
+        device = y.device
+        n_trials, n_time_bins, n_neurons = y.shape
+
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=device))
+        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=device))
+        t_mask_y_in = torch.bernoulli((1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons), device=device))
+
+        y_in = t_mask_y_in * y / (1 - p_mask_y_in)
+
+        k_y, K_y = self.local_encoder(y_in)
+        k_y = t_mask_a[..., None] * k_y
+        K_y = t_mask_a[..., None, None] * K_y
+
+        k_b, K_b = self.backward_encoder(k_y, K_y)
+        k_b = t_mask_b[..., None] * k_b
+        K_b = t_mask_b[..., None, None] * K_b
+
+        z_s, stats = self.nl_filter(u, k_y, K_y, k_b, K_b, n_samples, get_kl=get_kl)
+        return z_s, stats
+
+    @torch.jit.export
+    def fast_filter_1_to_T(self,
+                           y,
+                           u,
+                           n_samples: int,
+                           p_mask_a: float = 0.0,
+                           p_mask_y_in: float = 0.0,
+                           p_mask_b: float = 0.0,
+                           get_kl: bool = False,
+                           get_v: bool = False):
+
+        device = y.device
+        n_trials, n_time_bins, n_neurons = y.shape
+
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=device))
+        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=device))
+        t_mask_y_in = torch.bernoulli((1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons), device=device))
+
+        y_in = t_mask_y_in * y / (1 - p_mask_y_in)
+
+        k_y, K_y = self.local_encoder(y_in)
+
+        k_y = t_mask_a[..., None] * k_y
+        K_y = t_mask_a[..., None, None] * K_y
+
+        k_b, K_b = self.backward_encoder(k_y, K_y)
+        k_b = t_mask_b[..., None] * k_b * 0.0
+        K_b = t_mask_b[..., None, None] * K_b * 0.0
+
+        z_s, stats = self.nl_filter(u, k_y, K_y, k_b, K_b, n_samples, get_kl=get_kl)
+        return z_s, stats
+
+
 class NonlinearFilter(nn.Module):
     def __init__(self, dynamics_mod, initial_c_pdf, device):
         super(NonlinearFilter, self).__init__()
@@ -159,6 +247,77 @@ class NonlinearFilter(nn.Module):
             else:
                 m_fn_z_f_tm1 = self.dynamics_mod.mean_fn(z_f[t-1]).movedim(0, -1)
                 m_fn_z_s_tm1 = self.dynamics_mod.mean_fn(z_s[t-1]).movedim(0, -1)
+                z_f_t, m_f_t, m_p_t, M_p_c_t, Psi_f_t, Psi_p_t, h_f_t = fast_filter_step_t(m_fn_z_f_tm1, k_y[:, t], K_y[:, t], Q_diag, torch.tensor(False))
+                m_s_t, z_s_t, Psi_s_t = fast_update_filtering_to_smoothing_stats_t(z_f_t, h_f_t, m_f_t, Psi_f_t, M_p_c_t, k_b[:, t], K_b[:, t], K_y[:, t], Q_diag)
+                _, m_s_p_t, _, M_s_p_c_t, Psi_s_p_t = fast_predict_step(m_fn_z_s_tm1, Q_diag)
+                kl_t = low_rank_kl_step_t(m_s_t, m_s_p_t, M_p_c_t, M_s_p_c_t, K_y[:, t], K_b[:, t], Psi_p_t, Psi_f_t, Psi_s_p_t, Psi_s_t, Q_diag)
+
+            kl.append(kl_t)
+            z_s.append(z_s_t)
+            z_f.append(z_f_t)
+            m_s.append(m_s_t)
+            m_f.append(m_f_t)
+            m_p.append(m_p_t)
+            Psi_f.append(Psi_f_t)
+            Psi_p.append(Psi_p_t)
+
+        z_s = torch.stack(z_s, dim=2)
+        stats['kl'] = torch.stack(kl, dim=1)
+        stats['m_s'] = torch.stack(m_s, dim=1)
+        stats['m_f'] = torch.stack(m_f, dim=1)
+        stats['m_p'] = torch.stack(m_p, dim=1)
+        stats['Psi_f'] = torch.stack(Psi_f, dim=1)
+        stats['Psi_p'] = torch.stack(Psi_p, dim=1)
+
+        return z_s, stats
+
+
+class NonlinearFilterWithInput(nn.Module):
+    def __init__(self, input_latent_fn, dynamics_mod, initial_c_pdf, device):
+        super(NonlinearFilterWithInput, self).__init__()
+
+        self.device = device
+        self.dynamics_mod = dynamics_mod
+        self.initial_c_pdf = initial_c_pdf
+        self.input_latent_fn = input_latent_fn
+
+    def forward(self,
+                u: torch.Tensor,
+                k_y: torch.Tensor,
+                K_y: torch.Tensor,
+                k_b: torch.Tensor,
+                K_b: torch.Tensor,
+                n_samples: int,
+                get_kl: bool=False,
+                p_mask: float=0.0):
+
+        n_trials, n_time_bins, n_latents, rank_y = K_y.shape
+
+        kl = []
+        m_f = []
+        m_p = []
+        m_s = []
+        z_f = []
+        z_s = []
+        Psi_f = []
+        Psi_p = []
+
+        Q_diag = Fn.softplus(self.dynamics_mod.log_Q)
+        stats = {}
+
+        for t in range(n_time_bins):
+            input_update = self.input_latent_fn(u[:, t])
+
+            if t == 0:
+                m_0 = self.initial_c_pdf.m_0 + input_update
+                Q_0_diag = Fn.softplus(self.initial_c_pdf.log_Q_0)
+                Psi_p_t = torch.zeros((n_trials, n_samples, n_samples), device=k_y.device)
+                z_f_t, m_f_t, m_p_t, Psi_f_t, h_f_t = fast_filter_step_0(m_0, k_y[:, 0], K_y[:, 0], Q_0_diag, n_samples)
+                m_s_t, z_s_t, Psi_s_t = fast_update_filtering_to_smoothing_stats_0(z_f_t, h_f_t, m_f_t, Psi_f_t, k_b[:, t], K_b[:, t], K_y[:, t], Q_0_diag)
+                kl_t = low_rank_kl_step_0(m_s_t, m_0, Q_0_diag, Q_diag, K_y[:, 0], K_b[:, 0], Psi_f_t, Psi_s_t)
+            else:
+                m_fn_z_f_tm1 = self.dynamics_mod.mean_fn(z_f[t-1]).movedim(0, -1) + input_update
+                m_fn_z_s_tm1 = self.dynamics_mod.mean_fn(z_s[t-1]).movedim(0, -1) + input_update
                 z_f_t, m_f_t, m_p_t, M_p_c_t, Psi_f_t, Psi_p_t, h_f_t = fast_filter_step_t(m_fn_z_f_tm1, k_y[:, t], K_y[:, t], Q_diag, torch.tensor(False))
                 m_s_t, z_s_t, Psi_s_t = fast_update_filtering_to_smoothing_stats_t(z_f_t, h_f_t, m_f_t, Psi_f_t, M_p_c_t, k_b[:, t], K_b[:, t], K_y[:, t], Q_diag)
                 _, m_s_p_t, _, M_s_p_c_t, Psi_s_p_t = fast_predict_step(m_fn_z_s_tm1, Q_diag)

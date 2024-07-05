@@ -65,6 +65,38 @@ class LightningNonlinearSSM(lightning.LightningModule):
         self.ssm.initial_c_pdf.log_Q_0.data = torch.clip(self.ssm.initial_c_pdf.log_Q_0.data, min=log_Q_0_min)
 
 
+class LightningNonlinearSSMwithInput(LightningNonlinearSSM):
+    def __init__(self, ssm, cfg):
+        super(LightningNonlinearSSMwithInput).__init__(ssm, cfg)
+
+    def training_step(self, batch, batch_idx):
+        y = batch[0]
+        u = batch[1]
+
+        p_mask_y_in_t = self.p_mask_y_in
+        p_mask_b_t = self.p_mask_b * (1 + math.cos(2 * math.pi * self.current_epoch / 17.)) / 2.0
+        p_mask_a_t = self.p_mask_a * (1 + math.cos(2 * math.pi * self.current_epoch / 20.)) / 2.0
+        p_mask_apb_t = self.p_mask_apb * (1 + math.cos(2 * math.pi * self.current_epoch / 23.)) / 2.0
+
+        t_start = time.time()
+        loss, z_s, stats = self.ssm(y, u, self.n_samples, p_mask_a=p_mask_a_t, p_mask_apb=p_mask_apb_t,
+                                    p_mask_y_in=p_mask_y_in_t, p_mask_b=p_mask_b_t)
+        t_forward = time.time() - t_start
+
+        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("time_forward", t_forward, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        y = batch[0]
+        u = batch[1]
+
+        loss, z_s, stats = self.ssm(y, u, self.n_samples)
+        self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        return loss
+
+
 class LightningNlbNonlinearSSM(lightning.LightningModule):
     def __init__(self, ssm, cfg):
         super().__init__()
