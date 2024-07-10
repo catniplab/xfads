@@ -31,9 +31,9 @@ from xfads.smoothers.nonlinear_smoother_causal import NonlinearFilter, LowRankNo
 
 def main():
     T = 35
-    n_trials_plot = 8
-    n_samples_mu_plt = 20
-    predict_start_max = 8
+    n_trials_plot = 20
+    n_samples_mu_plt = 3
+    predict_start_max = 11
 
     torch.cuda.empty_cache()
     initialize(version_base=None, config_path="", job_name="monkey_reaching")
@@ -186,22 +186,58 @@ def main():
     reach_angle = torch.atan2(pos_test[:, -1, 0], pos_test[:, -1, 1])
     reach_colors = plt.cm.hsv(reach_angle / (2 * np.pi) + 0.5)
 
-    with torch.no_grad():
-        fig, axs = plt.subplots(1, 4 + predict_start_max, figsize=(8*7, 3))
+    trial_dx = 0
+    fig, axs = plt.subplots()
+    speeds = [[] for k in range(predict_start_max)]
+    speeds_gt = []
 
-        plot_utils.plot_reaching(axs[0], pos_test[trial_plt_dx], reach_colors[trial_plt_dx])
-        plot_utils.plot_reaching(axs[1], pos_test_hat_s[trial_plt_dx], reach_colors[trial_plt_dx])
-        plot_utils.plot_reaching(axs[2], pos_test_hat_f[trial_plt_dx], reach_colors[trial_plt_dx])
-        plot_utils.plot_reaching(axs[3], pos_test_hat_ic_p[trial_plt_dx], reach_colors[trial_plt_dx])
-        [plot_utils.plot_reaching(axs[4 + k], pos_test_hat_p[k][trial_plt_dx], reach_colors[trial_plt_dx]) for k in range(predict_start_max)]
+    for trial_dx in torch.arange(0, 108, 3):
+        cond_trials = test_data['condition_to_trial'][trial_dx]
+        speed_hat = [torch.tensor(vel_hat_test_p[k][cond_trials][..., 0]**2 + vel_hat_test_p[k][cond_trials][..., 1]**2).sqrt().mean(dim=[0]) for k in range(predict_start_max)]
+        speed_gt = torch.tensor(vel_test[cond_trials][..., 0]**2 + vel_test[cond_trials][..., 1]**2).sqrt().mean(dim=[0])
+        speed_padded = [torch.cat([torch.zeros(5), torch.nan_to_num(speed_hat[k][:-5], 0.0)], dim=-1) for k in range(predict_start_max)]
+        speed_gt_padded = torch.cat([torch.zeros(5), torch.nan_to_num(speed_gt[:-5], 0.0)], dim=-1)
+        [speeds[k].append(speed_padded[k].unsqueeze(0)) for k in range(predict_start_max)]
+        speeds_gt.append(speed_gt_padded.unsqueeze(0))
+        # axs.plot(speed)
 
-        axs[0].set_title('true')
-        axs[1].set_title(f'smoothed, r2:{r2_test_s:.3f}')
-        axs[2].set_title(f'filtered, r2:{r2_test_f:.3f}')
-        axs[3].set_title(f'prior, r2:{r2_test_ic_p:.3f}')
-        [axs[4 + k].set_title(f't_f={k}, r2:{r2_test_p[k]:.3f}') for k in range(predict_start_max)]
-        fig.savefig('plots/filtered_vs_smoothed_vs_predicted_position.pdf', bbox_inches='tight')
-        plt.show()
+    # speed_std = torch.cat(speeds[-1], dim=0).std(dim=0)
+    # speed_gt_std = torch.cat(speeds_gt, dim=0).std(dim=0)
+    # speed_mean = torch.cat(speeds[-1], dim=0).mean(dim=0)
+    # speed_gt_mean = torch.cat(speeds_gt, dim=0).mean(dim=0)
+    # axs.plot(speed_mean, color='red')
+    # axs.plot(speed_gt_mean, color='black')
+    # axs.plot(speed_mean + 2 * speed_std, color='red', linestyle='--')
+    # axs.plot(speed_mean - 2 * speed_std, color='red', linestyle='--')
+    # axs.plot(speed_gt_mean + 2 * speed_gt_std, color='black', linestyle='--')
+    # axs.plot(speed_gt_mean - 2 * speed_gt_std, color='black', linestyle='--')
+    # axs.axvline(12, linestyle='--')
+    # axs.set_xlabel('time')
+    # axs.set_ylabel('speed')
+    # fig.show()
+    # fig.savefig('plots/speed_center_out.pdf', bbox_inches='tight', transparent=True)
+
+    plot_utils.animate_reaching_evolution(r2_test_ic_p, r2_test_p, r2_test_f, pos_test_hat_ic_p, pos_test_hat_p, pos_test_hat_f,
+                                          reach_colors, trial_plt_dx, speeds_gt, speeds, 'plots/animation.mp4')
+
+    # with torch.no_grad():
+    #     fig, axs = plt.subplots(1, 4 + predict_start_max, figsize=(8*7, 3))
+    #
+    #     plot_utils.plot_reaching(axs[0], pos_test[trial_plt_dx], reach_colors[trial_plt_dx])
+    #     plot_utils.plot_reaching(axs[1], pos_test_hat_s[trial_plt_dx], reach_colors[trial_plt_dx])
+    #     plot_utils.plot_reaching(axs[2], pos_test_hat_f[trial_plt_dx], reach_colors[trial_plt_dx])
+    #     plot_utils.plot_reaching(axs[3], pos_test_hat_ic_p[trial_plt_dx], reach_colors[trial_plt_dx])
+    #
+    #
+    #     [plot_utils.plot_reaching(axs[4 + k], pos_test_hat_p[k][trial_plt_dx], reach_colors[trial_plt_dx]) for k in range(predict_start_max)]
+    #
+    #     axs[0].set_title('true')
+    #     axs[1].set_title(f'smoothed, r2:{r2_test_s:.3f}')
+    #     axs[2].set_title(f'filtered, r2:{r2_test_f:.3f}')
+    #     axs[3].set_title(f'prior, r2:{r2_test_ic_p:.3f}')
+    #     [axs[4 + k].set_title(f't_f={k}, r2:{r2_test_p[k]:.3f}') for k in range(predict_start_max)]
+    #     fig.savefig('plots/filtered_vs_smoothed_vs_predicted_position.pdf', bbox_inches='tight')
+    #     plt.show()
 
 
 if __name__ == '__main__':
