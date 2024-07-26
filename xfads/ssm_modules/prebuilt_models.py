@@ -23,7 +23,6 @@ from xfads.smoothers.nonlinear_smoother_causal import (
 )
 
 
-
 def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_type='n'):
     H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
     readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs))
@@ -62,7 +61,7 @@ def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_ty
     return ssm
 
 
-def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, train_dataloader, model_type='n'):
+def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_dataloader, model_type='n'):
     H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
     readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs))
     readout_fn[-1].bias.data = prob_utils.estimate_poisson_rate_bias(train_dataloader, cfg.bin_sz)
@@ -85,6 +84,9 @@ def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, train_dataloader, 
     local_encoder = LocalEncoderLRMvn(cfg.n_latents, n_neurons_obs, cfg.n_hidden_local, cfg.n_latents, rank=cfg.rank_local,
                                       device=cfg.device, dropout=cfg.p_local_dropout)
 
+    """input encoder"""
+    input_encoder = nn.Linear(n_inputs, cfg.n_latents, bias=False)
+
     """sequential vae"""
     if model_type == 'n':
         print('not supported')
@@ -93,7 +95,7 @@ def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, train_dataloader, 
         # ssm = LowRankNonlinearStateSpaceModelN(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder,
         #                                   local_encoder, nl_filter, device=cfg.device)
     elif model_type == 'c':
-        nl_filter = NonlinearFilterCwInput(dynamics_mod, initial_condition_pdf, device=cfg.device)
+        nl_filter = NonlinearFilterCwInput(input_encoder, dynamics_mod, initial_condition_pdf, device=cfg.device)
         ssm = LowRankNonlinearStateSpaceModelCwInput(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder,
                                                      local_encoder, nl_filter, device=cfg.device)
     else:

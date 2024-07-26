@@ -218,12 +218,13 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
 
 
 class LightningMonkeyReaching(lightning.LightningModule):
-    def __init__(self, ssm, cfg, n_time_bins_enc, n_time_bins_bhv, is_svae=False):
+    def __init__(self, ssm, cfg, n_time_bins_enc, n_time_bins_bhv, is_svae=False, use_input=False):
         super().__init__()
 
         self.ssm = ssm
         self.cfg = cfg
         self.is_svae = is_svae
+        self.use_input = use_input
         self.n_samples = cfg.n_samples
 
         self.use_cd = cfg.use_cd
@@ -263,8 +264,15 @@ class LightningMonkeyReaching(lightning.LightningModule):
         p_mask_apb_t = self.p_mask_apb * (1 + math.cos(2 * math.pi * self.current_epoch / 23.)) / 2.0
 
         t_start = time.time()
-        loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples, p_mask_a=p_mask_a_t,
-                                    p_mask_apb=p_mask_apb_t, p_mask_y_in=p_mask_y_in_t, p_mask_b=p_mask_b_t)
+
+        if self.use_input:
+            u_obs = batch[-1]
+            loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], u_obs[:, :n_time_bins_enc], self.n_samples,
+                                        p_mask_a=p_mask_a_t, p_mask_apb=p_mask_apb_t, p_mask_y_in=p_mask_y_in_t, p_mask_b=p_mask_b_t)
+        else:
+            loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples,
+                                        p_mask_a=p_mask_a_t, p_mask_apb=p_mask_apb_t, p_mask_y_in=p_mask_y_in_t,
+                                        p_mask_b=p_mask_b_t)
 
         t_forward = time.time() - t_start
 
@@ -286,9 +294,15 @@ class LightningMonkeyReaching(lightning.LightningModule):
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
 
-        loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
-        _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
-        z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
+        if self.use_input:
+            u_obs = batch[-1]
+            loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], u_obs[:, :n_time_bins_enc], self.n_samples)
+            _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], u_obs[:, :n_time_bins_enc], self.n_samples)
+            z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], u_obs[:, self.n_time_bins_bhv:], n_time_bins_enc - self.n_time_bins_bhv)
+        else:
+            loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
+            _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
+            z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
 
         log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
             dim=0)
@@ -311,8 +325,15 @@ class LightningMonkeyReaching(lightning.LightningModule):
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
+        _, z_bhv_init, _ = self.best_ssm_bhv(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
 
-        loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
+        if self.use_input:
+            loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
+            z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
+        else:
+            u_obs = batch[-1]
+            loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], u_obs[:, :n_time_bins_enc], self.n_samples)
+            z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], u_obs[:, self.n_time_bins_bhv:], n_time_bins_enc - self.n_time_bins_bhv)
 
         _, z_enc, _ = self.best_ssm_enc(y_obs[:, :n_time_bins_enc], self.n_samples)
         log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
@@ -321,8 +342,6 @@ class LightningMonkeyReaching(lightning.LightningModule):
         r2_test_enc = self.best_clf_enc.score(log_rate_enc_hat.reshape(-1, log_rate_enc_hat.shape[-1]).cpu(),
                                               x_obs[:, :n_time_bins_enc].reshape(-1, 2).cpu())
 
-        _, z_bhv_init, _ = self.best_ssm_bhv(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
-        z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
         log_rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
             dim=0)
 

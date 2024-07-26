@@ -204,6 +204,25 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         z_s, stats = self.nl_filter(u, k_y, K_y, k_b, K_b, n_samples, get_kl=get_kl)
         return z_s, stats
 
+    def predict_forward(self,
+                        z_tm1: torch.Tensor,
+                        u: torch.Tensor,
+                        n_bins: int):
+
+        z_forward = []
+        Q_sqrt = torch.sqrt(Fn.softplus(self.dynamics_mod.log_Q))
+
+        for t in range(n_bins):
+            if t == 0:
+                z_t = self.dynamics_mod.mean_fn(z_tm1) + Q_sqrt * torch.randn_like(z_tm1, device=z_tm1.device)
+            else:
+                z_t = self.dynamics_mod.mean_fn(z_forward[t-1]) + Q_sqrt * torch.randn_like(z_forward[t-1], device=z_tm1.device)
+
+            z_forward.append(z_t)
+
+        z_forward = torch.stack(z_forward, dim=2)
+        return z_forward
+
 
 class NonlinearFilter(nn.Module):
     def __init__(self, dynamics_mod, initial_c_pdf, device):
@@ -316,8 +335,8 @@ class NonlinearFilterWithInput(nn.Module):
                 m_s_t, z_s_t, Psi_s_t = fast_update_filtering_to_smoothing_stats_0(z_f_t, h_f_t, m_f_t, Psi_f_t, k_b[:, t], K_b[:, t], K_y[:, t], Q_0_diag)
                 kl_t = low_rank_kl_step_0(m_s_t, m_0, Q_0_diag, Q_diag, K_y[:, 0], K_b[:, 0], Psi_f_t, Psi_s_t)
             else:
-                m_fn_z_f_tm1 = self.dynamics_mod.mean_fn(z_f[t-1]).movedim(0, -1) + input_update
-                m_fn_z_s_tm1 = self.dynamics_mod.mean_fn(z_s[t-1]).movedim(0, -1) + input_update
+                m_fn_z_f_tm1 = self.dynamics_mod.mean_fn(z_f[t-1]).movedim(0, -1) + input_update.unsqueeze(-1)
+                m_fn_z_s_tm1 = self.dynamics_mod.mean_fn(z_s[t-1]).movedim(0, -1) + input_update.unsqueeze(-1)
                 z_f_t, m_f_t, m_p_t, M_p_c_t, Psi_f_t, Psi_p_t, h_f_t = fast_filter_step_t(m_fn_z_f_tm1, k_y[:, t], K_y[:, t], Q_diag, torch.tensor(False))
                 m_s_t, z_s_t, Psi_s_t = fast_update_filtering_to_smoothing_stats_t(z_f_t, h_f_t, m_f_t, Psi_f_t, M_p_c_t, k_b[:, t], K_b[:, t], K_y[:, t], Q_diag)
                 _, m_s_p_t, _, M_s_p_c_t, Psi_s_p_t = fast_predict_step(m_fn_z_s_tm1, Q_diag)
