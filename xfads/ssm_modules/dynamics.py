@@ -29,3 +29,4 @@ class DenseGaussianInitialCondition(nn.Module):
             self.log_Q_0 = utils.softplus_inv(Q_0_diag)
         else:
             self.log_Q_0 = torch.nn.Parameter(utils.softplus_inv(Q_0_diag)).to(device)
+

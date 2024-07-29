@@ -218,6 +218,7 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
             else:
                 z_t = self.dynamics_mod.mean_fn(z_forward[t-1]) + Q_sqrt * torch.randn_like(z_forward[t-1], device=z_tm1.device)
 
+            z_t += self.nl_filter.input_latent_fn(u[:, t])
             z_forward.append(z_t)
 
         z_forward = torch.stack(z_forward, dim=2)
