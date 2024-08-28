@@ -6,14 +6,17 @@ Approximate inference targeted at variational Gaussian state-space models with d
 A LowRankNonlinearStateSpaceModel object is used to perform inference in a state-space graphical model specified by,
 
 $$
-p(y_{1:T}, z_{1:T}) = p_{\theta}(z_1) p(y_1 | z_1) \prod p_{\psi}(y_t | z_t) p_{\theta}(z_t | z_{t-1})\
+p(y_{1:T}, z_{1:T}) = p_{\theta}(z_1) p(y_1 | z_1) \prod p_{\psi}(y_t | z_t) p_{\theta}(z_t | z_{t-1})
 $$
+<br>
 $$
-where\
+where
 $$
+<br>
 $$
-p_{\theta}(z_1) = N(m_0, Q_0)\
+p_{\theta}(z_1) = N(m_0, Q_0)
 $$
+<br>
 $$
 p_{\theta}(z_t | z_{t-1}) = N(m_{\theta}(z_{t-1}), Q)
 $$
