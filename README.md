@@ -6,10 +6,10 @@ Approximate inference targeted at variational Gaussian state-space models with d
 A LowRankNonlinearStateSpaceModel object is used to perform inference in a state-space graphical model specified by,
 
 ``` math
-\begin{matrix}p(y_{1:T}, z_{1:T}) = p_{\theta}(z_1) p(y_1 | z_1) \prod p_{\psi}(y_t | z_t) p_{\theta}(z_t | z_{t-1}) \\ where \\ p_{\theta}(z_1) = N(m_0, Q_0) \\ p_{\theta}(z_t | z_{t-1}) = N(m_{\theta}(z_{t-1}), Q)\end{matrix}
+\begin{matrix}p(y_{1:T}, z_{1:T}) = p_{\theta}(z_1) p(y_1 | z_1) \prod p_{\psi}(y_t | z_t) p_{\theta}(z_t | z_{t-1}) \\ where \\ p_{\theta}(z_1) = N(m_0, Q_0) \\ p_{\theta}(z_t | z_{t-1}) = N(m_{\theta}(z_{t-1}), Q)\end{matrix}\
 ```
 
-\Specification of a LowRankNonlinearStateSpaceModel requires:
+Specification of a LowRankNonlinearStateSpaceModel requires:
 
 1. dynamics_mod: a nn.Module with a `mean_fn` attribute that specifies $m_{\theta}(\cdot)$ (e.g. some neural network function) 
 2. initial_c_pdf: a nn.Module that specifies the initial mean, $m_0$, and initial state-noise $Q_0$
