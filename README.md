@@ -9,6 +9,7 @@ A LowRankNonlinearStateSpaceModel object is used to perform inference in a state
 \begin{matrix}p(y_{1:T}, z_{1:T}) = p_{\theta}(z_1) p(y_1 | z_1) \prod p_{\psi}(y_t | z_t) p_{\theta}(z_t | z_{t-1}) \\ where \\ p_{\theta}(z_1) = N(m_0, Q_0) \\ p_{\theta}(z_t | z_{t-1}) = N(m_{\theta}(z_{t-1}), Q)\end{matrix}
 ```
 
+
 Specification of a LowRankNonlinearStateSpaceModel requires:
 
 1. dynamics_mod: a nn.Module with a `mean_fn` attribute that specifies $m_{\theta}(\cdot)$ (e.g. some neural network function) 
