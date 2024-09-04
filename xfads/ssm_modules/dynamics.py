@@ -2,7 +2,10 @@ import torch
 import torch.nn as nn
 import xfads.utils as utils
 
+from xfads.decorators import *
 
+
+@apply_memory_cleanup
 class DenseGaussianDynamics(nn.Module):
     def __init__(self, mean_fn, n_latents, Q_diag, device='cpu', fix_Q=False):
         super(DenseGaussianDynamics, self).__init__()
@@ -18,6 +21,7 @@ class DenseGaussianDynamics(nn.Module):
             self.log_Q = torch.nn.Parameter(utils.softplus_inv(Q_diag))
 
 
+@apply_memory_cleanup
 class DenseGaussianInitialCondition(nn.Module):
     def __init__(self, n_latents, m_0, Q_0_diag, device='cpu', fix_Q_0=False):
         super(DenseGaussianInitialCondition, self).__init__()

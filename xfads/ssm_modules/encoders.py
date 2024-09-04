@@ -2,7 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as Fn
 
+from xfads.decorators import *
 
+
+@apply_memory_cleanup
 class LocalEncoderLRMvn(nn.Module):
     def __init__(self, n_latents_read, input_size, hidden_size, n_latents, rank, device='cpu', dropout=0.0):
         super(LocalEncoderLRMvn, self).__init__()
@@ -29,6 +32,7 @@ class LocalEncoderLRMvn(nn.Module):
         return h, L
 
 
+@apply_memory_cleanup
 class BackwardEncoderLRMvn(nn.Module):
     def __init__(self, n_latents_read, hidden_size, n_latents, rank_local, rank_backward, device='cpu'):
         super(BackwardEncoderLRMvn, self).__init__()
@@ -66,6 +70,7 @@ class BackwardEncoderLRMvn(nn.Module):
         return h_out, L_out
 
 
+@apply_memory_cleanup
 class LocalEncoderDiagonal(nn.Module):
     def __init__(self, n_latents_read, input_size, hidden_size, n_latents, rank, device='cpu', dropout=0.0):
         super(LocalEncoderDiagonal, self).__init__()
@@ -88,6 +93,7 @@ class LocalEncoderDiagonal(nn.Module):
         return h, L_vec
 
 
+@apply_memory_cleanup
 class BackwardEncoderDiagonal(nn.Module):
     def __init__(self, n_latents_read, hidden_size, n_latents, rank_local, rank_backward, device='cpu'):
         super(BackwardEncoderDiagonal, self).__init__()
@@ -121,6 +127,7 @@ class BackwardEncoderDiagonal(nn.Module):
         return h_out, L_vec_out
 
 
+@apply_memory_cleanup
 class BackwardEncoderDVBF(nn.Module):
     def __init__(self, n_neurons, hidden_size, n_latents, device='cpu'):
         super(BackwardEncoderDVBF, self).__init__()
@@ -145,6 +152,7 @@ class BackwardEncoderDVBF(nn.Module):
         return m, P_diag
 
 
+@apply_memory_cleanup
 class LocalEncoderDVBF(nn.Module):
     def __init__(self, n_neurons, hidden_size, n_latents, device='cpu'):
         super(LocalEncoderDVBF, self).__init__()
@@ -164,6 +172,7 @@ class LocalEncoderDVBF(nn.Module):
         return m, P_diag
 
 
+@apply_memory_cleanup
 class BackwardEncoderDKF(nn.Module):
     def __init__(self, n_neurons, hidden_size, n_latents, device='cpu'):
         super(BackwardEncoderDKF, self).__init__()
@@ -180,6 +189,7 @@ class BackwardEncoderDKF(nn.Module):
         return w
 
 
+@apply_memory_cleanup
 class LocalEncoderDKF(nn.Module):
     def __init__(self, n_hidden_local, n_hidden_backward, n_latents, device='cpu'):
         super(LocalEncoderDKF, self).__init__()
@@ -200,6 +210,7 @@ class LocalEncoderDKF(nn.Module):
         return m, P_diag
 
 
+@apply_memory_cleanup
 class InitEncoderDKF(nn.Module):
     def __init__(self, hidden_size, n_latents, device='cpu'):
         super(InitEncoderDKF, self).__init__()
