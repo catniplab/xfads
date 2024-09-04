@@ -52,38 +52,52 @@ def main():
                                                            strict=False)
     """extract trained ssm from lightning module"""
     seq_vae.ssm = seq_vae.ssm.to(cfg.device)
-    seq_vae.ssm.eval()
-
+    seq_vae.ssm.eval()        
+    
+    """inference"""
     z_s_train = []
+
+    z_s_test = []
+    z_f_test = []
+    z_p_test = []
+
     z_s_valid = []
     z_f_valid = []
     z_p_valid = []
+    
+    with torch.no_grad():
 
-    for batch in train_dataloader:
-        loss, z, stats = seq_vae.ssm(batch[0], cfg.n_samples)
-        z_s_train.append(z)
+        for batch in train_dataloader:
+            loss, z, stats = seq_vae.ssm(batch[0], cfg.n_samples)
+            z_s_train.append(z)
+            
+        for batch in valid_dataloader:
+            z_f, stats = seq_vae.ssm.fast_filter_1_to_T(batch[0], cfg.n_samples)
+            loss, z, stats = seq_vae.ssm(batch[0], cfg.n_samples)
+            z_p = seq_vae.ssm.predict_forward(z_f[:, :, cfg.n_bins_bhv], cfg.n_samples)
+            z_p = torch.cat([z_f[:, :, :cfg.n_bins_bhv], z_p], dim=2)
+            z_f_valid.append(z_f)
+            z_p_valid.append(z_p)
+            z_s_valid.append(z)
+            
+        for batch in test_dataloader:
+            z_f, stats = seq_vae.ssm.fast_filter_1_to_T(batch[0], cfg.n_samples)
+            loss, z, stats = seq_vae.ssm(batch[0], cfg.n_samples)
+            z_p = seq_vae.ssm.predict_forward(z_f[:, :, cfg.n_bins_bhv], 45-cfg.n_bins_bhv)
+            z_p = torch.cat([z_f[:, :, :cfg.n_bins_bhv], z_p], dim=2)
+            z_f_test.append(z_f)
+            z_p_test.append(z_p)
+            z_s_test.append(z)
 
-    for batch in valid_dataloader:
-        z_f, stats = seq_vae.ssm.fast_filter_1_to_T(batch[0], cfg.n_samples)
-        loss, z, stats = seq_vae.ssm(batch[0], cfg.n_samples)
-        z_p = seq_vae.ssm.predict_forward(z_f[:, :, 10], cfg.n_samples)
-        z_p = torch.cat([z_f[:, :, :10], z_p], dim=2)
-        z_f_valid.append(z_f)
-        z_p_valid.append(z_p)
-        z_s_valid.append(z)
+        z_s_train = torch.cat(z_s_train, dim=1)
 
-    U, S, V = torch.svd(seq_vae.ssm.likelihood_pdf.readout_fn[-1].weight.data)
-    V = S.unsqueeze(-1) * V
+        z_s_test = torch.cat(z_s_test, dim=1)
+        z_f_test = torch.cat(z_f_test, dim=1)
+        z_p_test = torch.cat(z_p_test, dim=1)
 
-    z_s_train = torch.cat(z_s_train, dim=1)
-    z_s_valid = torch.cat(z_s_valid, dim=1)
-    z_f_valid = torch.cat(z_f_valid, dim=1)
-    z_p_valid = torch.cat(z_p_valid, dim=1)
-
-    z_s_train = z_s_train[..., :cfg.n_latents_read] @ V
-    z_s_test = z_s_valid[..., :cfg.n_latents_read] @ V
-    z_f_test = z_f_valid[..., :cfg.n_latents_read] @ V
-    z_p_test = z_p_valid[..., :cfg.n_latents_read] @ V
+        z_s_valid = torch.cat(z_s_valid, dim=1)
+        z_f_valid = torch.cat(z_f_valid, dim=1)
+        z_p_valid = torch.cat(z_p_valid, dim=1)
 
     """colors"""
     blues = cm.get_cmap("winter", z_s_test.shape[0])
