@@ -228,7 +228,7 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
 
 
 class LightningMonkeyReaching(lightning.LightningModule):
-    def __init__(self, ssm, cfg, n_time_bins_enc, n_time_bins_bhv, is_svae=False, use_input=False):
+    def __init__(self, ssm, cfg, n_time_bins_enc, bin_prd_start, is_svae=False, use_input=False):
         super().__init__()
 
         self.ssm = ssm
@@ -244,23 +244,23 @@ class LightningMonkeyReaching(lightning.LightningModule):
         self.p_mask_y_in = cfg.p_mask_y_in
 
         self.n_time_bins_enc = n_time_bins_enc
-        self.n_time_bins_bhv = n_time_bins_bhv
+        self.bin_prd_start = bin_prd_start
 
         self.save_hyperparameters(ignore=['ssm', 'cfg'])
 
         self.train_rates_enc = []
         self.valid_rates_enc = []
-        self.valid_rates_bhv = []
+        self.valid_rates_prd = []
         self.train_veloc_enc = []
         self.valid_veloc_enc = []
-        self.valid_veloc_bhv = []
+        self.valid_veloc_prd = []
 
         self.best_r2_enc = -1.0
-        self.best_r2_bhv = -1.0
+        self.best_r2_prd = -1.0
         self.best_clf_enc = None
-        self.best_clf_bhv = None
+        self.best_clf_prd = None
         self.best_ssm_enc = None
-        self.best_ssm_bhv = None
+        self.best_ssm_prd = None
 
     def training_step(self, batch, batch_idx):
         y_obs = batch[0]
@@ -308,27 +308,27 @@ class LightningMonkeyReaching(lightning.LightningModule):
             if self.use_input:
                 u_obs = batch[-1]
                 loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], u_obs[:, :n_time_bins_enc], self.n_samples)
-                _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], u_obs[:, :n_time_bins_enc], self.n_samples)
-                z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], u_obs[:, self.n_time_bins_bhv:], n_time_bins_enc - self.n_time_bins_bhv)
+                _, z_s_prd_init, stats_enc = self.ssm(y_obs[:, :self.bin_prd_start], u_obs[:, :n_time_bins_enc], self.n_samples)
+                z_p_prd = self.ssm.predict_forward(z_s_prd_init[:, :, -1], u_obs[:, self.bin_prd_start:], n_time_bins_enc - self.bin_prd_start)
             else:
                 loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
-                _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
-                z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
+                _, z_s_prd_init, stats_enc = self.ssm(y_obs[:, :self.bin_prd_start], self.n_samples)
+                z_p_prd = self.ssm.predict_forward(z_s_prd_init[:, :, -1], n_time_bins_enc - self.bin_prd_start)
 
             rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
                 dim=0)
-            rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            rate_prd_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_prd)).mean(
                 dim=0)
 
             bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
-            bps_bhv = prob_utils.bits_per_spike(torch.log(rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+            bps_prd = prob_utils.bits_per_spike(torch.log(rate_prd_hat), y_obs[:, self.bin_prd_start:n_time_bins_enc])
 
             self.valid_rates_enc.append(rate_enc_hat)
-            self.valid_rates_bhv.append(rate_bhv_hat)
+            self.valid_rates_prd.append(rate_prd_hat)
             self.valid_veloc_enc.append(x_obs[:, :n_time_bins_enc])
 
             self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
-            self.log("valid_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+            self.log("valid_bps_prd", bps_prd, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
             self.log("valid_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
             
         return loss
@@ -342,13 +342,13 @@ class LightningMonkeyReaching(lightning.LightningModule):
             if self.use_input:
                 u_obs = batch[-1]
                 loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], u_obs[:, :n_time_bins_enc], self.n_samples)
-                _, z_bhv_init, _ = self.best_ssm_bhv(y_obs[:, :self.n_time_bins_bhv], u_obs[:, :self.n_time_bins_bhv], self.n_samples)
-                z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], u_obs[:, self.n_time_bins_bhv:], n_time_bins_enc - self.n_time_bins_bhv)
+                _, z_prd_init, _ = self.best_ssm_prd(y_obs[:, :self.bin_prd_start], u_obs[:, :self.bin_prd_start], self.n_samples)
+                z_p_prd = self.best_ssm_prd.predict_forward(z_prd_init[:, :, -1], u_obs[:, self.bin_prd_start:], n_time_bins_enc - self.bin_prd_start)
                 _, z_enc, _ = self.best_ssm_enc(y_obs[:, :n_time_bins_enc], u_obs[:, :n_time_bins_enc], self.n_samples)
             else:
                 loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
-                _, z_bhv_init, _ = self.best_ssm_bhv(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
-                z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
+                _, z_prd_init, _ = self.best_ssm_prd(y_obs[:, :self.bin_prd_start], self.n_samples)
+                z_p_prd = self.best_ssm_prd.predict_forward(z_prd_init[:, :, -1], n_time_bins_enc - self.bin_prd_start)
                 _, z_enc, _ = self.best_ssm_enc(y_obs[:, :n_time_bins_enc], self.n_samples)
 
             rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
@@ -357,20 +357,20 @@ class LightningMonkeyReaching(lightning.LightningModule):
             r2_test_enc = self.best_clf_enc.score(rate_enc_hat.reshape(-1, rate_enc_hat.shape[-1]).cpu(),
                                                   x_obs[:, :n_time_bins_enc].reshape(-1, 2).cpu())
 
-            rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            rate_prd_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_prd)).mean(
                 dim=0)
 
-            r2_test_bhv = self.best_clf_bhv.score(rate_bhv_hat.reshape(-1, rate_bhv_hat.shape[-1]).cpu(),
-                                                  x_obs[:, self.n_time_bins_bhv: n_time_bins_enc].reshape(-1, 2).cpu())
+            r2_test_prd = self.best_clf_prd.score(rate_prd_hat.reshape(-1, rate_prd_hat.shape[-1]).cpu(),
+                                                  x_obs[:, self.bin_prd_start: n_time_bins_enc].reshape(-1, 2).cpu())
 
             bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
-            bps_bhv = prob_utils.bits_per_spike(torch.log(rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+            bps_prd = prob_utils.bits_per_spike(torch.log(rate_prd_hat), y_obs[:, self.bin_prd_start:n_time_bins_enc])
 
             self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log("test_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+            self.log("test_bps_prd", bps_prd, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
             self.log("test_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
             self.log("r2_test_enc", r2_test_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log("r2_test_bhv", r2_test_bhv, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log("r2_test_prd", r2_test_prd, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
         return loss
 
@@ -398,7 +398,7 @@ class LightningMonkeyReaching(lightning.LightningModule):
     def on_validation_epoch_end(self):
         if self.current_epoch == 0:
             self.log("r2_valid_enc", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log("r2_valid_bhv", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log("r2_valid_prd", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
             self.log("r2_train_enc", -1, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
 
@@ -407,11 +407,11 @@ class LightningMonkeyReaching(lightning.LightningModule):
                 n_time_bins_enc = self.n_time_bins_enc
                 train_rates_enc = torch.cat(self.train_rates_enc, dim=0)
                 valid_rates_enc = torch.cat(self.valid_rates_enc, dim=0)
-                valid_rates_bhv = torch.cat(self.valid_rates_bhv, dim=0)
+                valid_rates_prd = torch.cat(self.valid_rates_prd, dim=0)
 
                 train_veloc_enc = torch.cat(self.train_veloc_enc, dim=0)
                 valid_veloc_enc = torch.cat(self.valid_veloc_enc, dim=0)
-                valid_veloc_bhv = valid_veloc_enc[:, self.n_time_bins_bhv:self.n_time_bins_enc]
+                valid_veloc_prd = valid_veloc_enc[:, self.bin_prd_start:self.n_time_bins_enc]
                 _, n_time_bins, n_neurons = train_rates_enc.shape
 
                 clf = Ridge(alpha=0.01)
@@ -419,30 +419,30 @@ class LightningMonkeyReaching(lightning.LightningModule):
 
                 r2_train_enc = clf.score(train_rates_enc.reshape(-1, n_neurons).cpu(), train_veloc_enc.reshape(-1, 2).cpu())
                 r2_valid_enc = clf.score(valid_rates_enc.reshape(-1, n_neurons).cpu(), valid_veloc_enc.reshape(-1, 2).cpu())
-                r2_valid_bhv = clf.score(valid_rates_bhv.reshape(-1, n_neurons).cpu(), valid_veloc_bhv.reshape(-1, 2).cpu())
+                r2_valid_prd = clf.score(valid_rates_prd.reshape(-1, n_neurons).cpu(), valid_veloc_prd.reshape(-1, 2).cpu())
 
                 if r2_valid_enc >= self.best_r2_enc:
                     print(f'current_epoch: {self.current_epoch}')
                     self.best_clf_enc = copy.deepcopy(clf)
                     self.best_ssm_enc = copy.deepcopy(self.ssm)
-                if r2_valid_bhv >= self.best_r2_bhv:
-                    self.best_clf_bhv = copy.deepcopy(clf)
-                    self.best_ssm_bhv = copy.deepcopy(self.ssm)
+                if r2_valid_prd >= self.best_r2_prd:
+                    self.best_clf_prd = copy.deepcopy(clf)
+                    self.best_ssm_prd = copy.deepcopy(self.ssm)
 
                 self.log("r2_train_enc", r2_train_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
                 self.log("r2_valid_enc", r2_valid_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-                self.log("r2_valid_bhv", r2_valid_bhv, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+                self.log("r2_valid_prd", r2_valid_prd, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
         self.train_rates_enc = []
         self.valid_rates_enc = []
-        self.valid_rates_bhv = []
+        self.valid_rates_prd = []
 
         self.train_veloc_enc = []
         self.valid_veloc_enc = []
 
 
 class LightningDMFCRSG(lightning.LightningModule):
-    def __init__(self, ssm, cfg, n_time_bins_enc, n_time_bins_bhv, is_svae=False):
+    def __init__(self, ssm, cfg, n_time_bins_enc, n_time_bins_prd, is_svae=False):
         super().__init__()
 
         self.ssm = ssm
@@ -457,14 +457,14 @@ class LightningDMFCRSG(lightning.LightningModule):
         self.p_mask_y_in = cfg.p_mask_y_in
 
         self.n_time_bins_enc = n_time_bins_enc
-        self.n_time_bins_bhv = n_time_bins_bhv
+        self.n_time_bins_prd = n_time_bins_prd
 
         self.save_hyperparameters(ignore=['ssm', 'cfg'])
 
         self.best_bps_enc = -1.0
-        self.best_bps_bhv = -1.0
+        self.best_bps_prd = -1.0
         self.best_ssm_enc = None
-        self.best_ssm_bhv = None
+        self.best_ssm_prd = None
 
     def training_step(self, batch, batch_idx):
         y_obs = batch[0]
@@ -498,26 +498,26 @@ class LightningDMFCRSG(lightning.LightningModule):
         
         with torch.no_grad():
             loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
-            _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
-            z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
+            _, z_s_prd_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_prd], self.n_samples)
+            z_p_prd = self.ssm.predict_forward(z_s_prd_init[:, :, -1], n_time_bins_enc - self.n_time_bins_prd)
 
             rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
                 dim=0)
-            rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            rate_prd_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_prd)).mean(
                 dim=0)
 
             bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
-            bps_bhv = prob_utils.bits_per_spike(torch.log(rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+            bps_prd = prob_utils.bits_per_spike(torch.log(rate_prd_hat), y_obs[:, self.n_time_bins_prd:n_time_bins_enc])
 
             if bps_enc >= self.best_bps_enc:
                 print(f'current_epoch: {self.current_epoch}')
                 self.best_ssm_enc = copy.deepcopy(self.ssm)
-            if bps_bhv >= self.best_bps_bhv:
-                self.best_ssm_bhv = copy.deepcopy(self.ssm)
+            if bps_prd >= self.best_bps_prd:
+                self.best_ssm_prd = copy.deepcopy(self.ssm)
 
             self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
             self.log("valid_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log("valid_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log("valid_bps_prd", bps_prd, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
             
         return loss
 
@@ -531,16 +531,16 @@ class LightningDMFCRSG(lightning.LightningModule):
             rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
                 dim=0)
 
-            _, z_bhv_init, _ = self.best_ssm_bhv(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
-            z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
-            rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            _, z_prd_init, _ = self.best_ssm_prd(y_obs[:, :self.n_time_bins_prd], self.n_samples)
+            z_p_prd = self.best_ssm_prd.predict_forward(z_prd_init[:, :, -1], n_time_bins_enc - self.n_time_bins_prd)
+            rate_prd_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_prd)).mean(
                 dim=0)
 
             bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
-            bps_bhv = prob_utils.bits_per_spike(torch.log(rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+            bps_prd = prob_utils.bits_per_spike(torch.log(rate_prd_hat), y_obs[:, self.n_time_bins_prd:n_time_bins_enc])
 
             self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log("test_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+            self.log("test_bps_prd", bps_prd, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
             self.log("test_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
             
         return loss

@@ -10,7 +10,8 @@ from xfads.ssm_modules.prebuilt_models import create_xfads_poisson_log_link
 
 def main():
     # at t=n_bins_bhv start forecast
-    n_bins_bhv = 10
+    bin_prd_start = 10
+    check_val_every_n_epoch = 50
 
     torch.cuda.empty_cache()
     initialize(version_base=None, config_path="", job_name="monkey_reaching")
@@ -45,9 +46,14 @@ def main():
     ssm = create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_type='n')
 
     """lightning"""
-    seq_vae = LightningMonkeyReaching(ssm, cfg, n_time_bins_enc, n_bins_bhv)
-    csv_logger = CSVLogger('logs/smoother/acausal/', name=f'sd_{cfg.seed}_r_y_{cfg.rank_local}_r_b_{cfg.rank_backward}', version='smoother_acausal')
-    ckpt_callback = ModelCheckpoint(save_top_k=3, monitor='r2_valid_enc', mode='max', dirpath='ckpts/smoother/acausal/', save_last=True,
+    seq_vae = LightningMonkeyReaching(ssm, cfg, n_time_bins_enc, bin_prd_start)
+    # compiled_seq_vae = torch.compile(seq_vae)
+
+    csv_logger = CSVLogger('logs/smoother/acausal/',
+                           name=f'sd_{cfg.seed}_r_y_{cfg.rank_local}_r_b_{cfg.rank_backward}',
+                           version='smoother_acausal')
+    ckpt_callback = ModelCheckpoint(save_top_k=3, monitor='r2_valid_enc', mode='max',
+                                    dirpath='ckpts/smoother/acausal/', save_last=True,
                                     filename='{epoch:0}_{valid_loss:0.2f}_{r2_valid_enc:0.2f}_{r2_valid_bhv:0.2f}_{valid_bps_enc:0.2f}')
 
     trainer = lightning.Trainer(max_epochs=cfg.n_epochs,
@@ -55,6 +61,7 @@ def main():
                                 default_root_dir='lightning/',
                                 callbacks=[ckpt_callback],
                                 logger=csv_logger,
+                                check_val_every_n_epoch=check_val_every_n_epoch
                                 )
 
     trainer.fit(model=seq_vae, train_dataloaders=train_dataloader, val_dataloaders=valid_dataloader)
