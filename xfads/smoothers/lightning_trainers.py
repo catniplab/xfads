@@ -287,10 +287,10 @@ class LightningMonkeyReaching(lightning.LightningModule):
         t_forward = time.time() - t_start
 
         with torch.no_grad():
-            log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(dim=0)
-            bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
+            rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(dim=0)
+            bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
 
-            self.train_rates_enc.append(log_rate_enc_hat)
+            self.train_rates_enc.append(rate_enc_hat)
             self.train_veloc_enc.append(x_obs[:, :n_time_bins_enc])
 
             self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
@@ -315,16 +315,16 @@ class LightningMonkeyReaching(lightning.LightningModule):
                 _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
                 z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
 
-            log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
+            rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
                 dim=0)
-            log_rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
                 dim=0)
 
-            bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
-            bps_bhv = prob_utils.bits_per_spike(torch.log(log_rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+            bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
+            bps_bhv = prob_utils.bits_per_spike(torch.log(rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
 
-            self.valid_rates_enc.append(log_rate_enc_hat)
-            self.valid_rates_bhv.append(log_rate_bhv_hat)
+            self.valid_rates_enc.append(rate_enc_hat)
+            self.valid_rates_bhv.append(rate_bhv_hat)
             self.valid_veloc_enc.append(x_obs[:, :n_time_bins_enc])
 
             self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
@@ -351,20 +351,20 @@ class LightningMonkeyReaching(lightning.LightningModule):
                 z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
                 _, z_enc, _ = self.best_ssm_enc(y_obs[:, :n_time_bins_enc], self.n_samples)
 
-            log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
+            rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
                 dim=0)
 
-            r2_test_enc = self.best_clf_enc.score(log_rate_enc_hat.reshape(-1, log_rate_enc_hat.shape[-1]).cpu(),
+            r2_test_enc = self.best_clf_enc.score(rate_enc_hat.reshape(-1, rate_enc_hat.shape[-1]).cpu(),
                                                   x_obs[:, :n_time_bins_enc].reshape(-1, 2).cpu())
 
-            log_rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
                 dim=0)
 
-            r2_test_bhv = self.best_clf_bhv.score(log_rate_bhv_hat.reshape(-1, log_rate_bhv_hat.shape[-1]).cpu(),
+            r2_test_bhv = self.best_clf_bhv.score(rate_bhv_hat.reshape(-1, rate_bhv_hat.shape[-1]).cpu(),
                                                   x_obs[:, self.n_time_bins_bhv: n_time_bins_enc].reshape(-1, 2).cpu())
 
-            bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
-            bps_bhv = prob_utils.bits_per_spike(torch.log(log_rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+            bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
+            bps_bhv = prob_utils.bits_per_spike(torch.log(rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
 
             self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
             self.log("test_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
@@ -483,8 +483,8 @@ class LightningDMFCRSG(lightning.LightningModule):
         t_forward = time.time() - t_start
 
         with torch.no_grad():
-            log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(dim=0)
-            bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
+            rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(dim=0)
+            bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
 
             self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
             self.log("train_bps_enc", bps_enc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
@@ -501,13 +501,13 @@ class LightningDMFCRSG(lightning.LightningModule):
             _, z_s_bhv_init, stats_enc = self.ssm(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
             z_p_bhv = self.ssm.predict_forward(z_s_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
 
-            log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
+            rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
                 dim=0)
-            log_rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
                 dim=0)
 
-            bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
-            bps_bhv = prob_utils.bits_per_spike(torch.log(log_rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+            bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
+            bps_bhv = prob_utils.bits_per_spike(torch.log(rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
 
             if bps_enc >= self.best_bps_enc:
                 print(f'current_epoch: {self.current_epoch}')
@@ -528,16 +528,16 @@ class LightningDMFCRSG(lightning.LightningModule):
         with torch.no_grad():
             loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
             _, z_enc, _ = self.best_ssm_enc(y_obs[:, :n_time_bins_enc], self.n_samples)
-            log_rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
+            rate_enc_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_s)).mean(
                 dim=0)
 
             _, z_bhv_init, _ = self.best_ssm_bhv(y_obs[:, :self.n_time_bins_bhv], self.n_samples)
             z_p_bhv = self.best_ssm_bhv.predict_forward(z_bhv_init[:, :, -1], n_time_bins_enc - self.n_time_bins_bhv)
-            log_rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
+            rate_bhv_hat = self.ssm.likelihood_pdf.delta * torch.exp(self.ssm.likelihood_pdf.readout_fn(z_p_bhv)).mean(
                 dim=0)
 
-            bps_enc = prob_utils.bits_per_spike(torch.log(log_rate_enc_hat), y_obs[:, :n_time_bins_enc])
-            bps_bhv = prob_utils.bits_per_spike(torch.log(log_rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
+            bps_enc = prob_utils.bits_per_spike(torch.log(rate_enc_hat), y_obs[:, :n_time_bins_enc])
+            bps_bhv = prob_utils.bits_per_spike(torch.log(rate_bhv_hat), y_obs[:, self.n_time_bins_bhv:n_time_bins_enc])
 
             self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
             self.log("test_bps_bhv", bps_bhv, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
