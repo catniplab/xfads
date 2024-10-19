@@ -15,12 +15,12 @@ from xfads.smoothers.lightning_trainers import LightningNonlinearSSM
 from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
 from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
 from xfads.smoothers.nonlinear_smoother_causal import NonlinearFilter, LowRankNonlinearStateSpaceModel
-# from dev.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
+#from xfads.smoothers.nonlinear_smoother import NonlinearFilter, LowRankNonlinearStateSpaceModel
 
-# from dev.smoothers.nonlinear_smoother_diagonal import NonlinearFilter
-# from dev.ssm_modules.encoders import LocalEncoderDiagonal as LocalEncoderLRMvn
-# from dev.ssm_modules.encoders import BackwardEncoderDiagonal as BackwardEncoderLRMvn
-# from dev.smoothers.nonlinear_smoother_diagonal import DiagonalNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModel
+#from xfads.smoothers.nonlinear_smoother_diagonal import NonlinearFilter
+#from xfads.ssm_modules.encoders import LocalEncoderDiagonal as LocalEncoderLRMvn
+#from xfads.ssm_modules.encoders import BackwardEncoderDiagonal as BackwardEncoderLRMvn
+#from xfads.smoothers.nonlinear_smoother_diagonal import DiagonalNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModel
 
 
 
