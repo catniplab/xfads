@@ -5,7 +5,10 @@ import torch.nn.functional as Fn
 import xfads.linalg_utils as linalg_utils
 from xfads.linalg_utils import bmv, bip, chol_bmv_solve
 
+from xfads.decorators import *
 
+
+@apply_memory_cleanup
 class LowRankNonlinearStateSpaceModel(nn.Module):
     def __init__(self, dynamics_mod, likelihood_pdf,
                  initial_c_pdf, backward_encoder, local_encoder, nl_filter, device='cpu'):
@@ -135,6 +138,7 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         return z_forward
 
 
+@apply_memory_cleanup
 class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
     def __init__(self, dynamics_mod, likelihood_pdf,
                  initial_c_pdf, backward_encoder, local_encoder, nl_filter, device='cpu'):
@@ -261,6 +265,7 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         return z_forward
 
 
+@apply_memory_cleanup
 class NonlinearFilter(nn.Module):
     def __init__(self, dynamics_mod, initial_c_pdf, device):
         super(NonlinearFilter, self).__init__()
@@ -328,6 +333,7 @@ class NonlinearFilter(nn.Module):
         return z_s, stats
 
 
+@apply_memory_cleanup
 class NonlinearFilterWithInput(nn.Module):
     def __init__(self, input_latent_fn, dynamics_mod, initial_c_pdf, device):
         super(NonlinearFilterWithInput, self).__init__()

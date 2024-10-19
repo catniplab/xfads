@@ -4,7 +4,10 @@ import torch.nn as nn
 import xfads.utils as utils
 import torch.nn.functional as Fn
 
+from xfads.decorators import *
 
+
+@apply_memory_cleanup
 class GaussianLikelihood(nn.Module):
     def __init__(self, readout_fn, n_neurons, R_diag, device='cpu', fix_R=False):
         super(GaussianLikelihood, self).__init__()
@@ -25,6 +28,7 @@ class GaussianLikelihood(nn.Module):
         return log_p_y
 
 
+@apply_memory_cleanup
 class PoissonLikelihood(nn.Module):
     def __init__(self, readout_fn, n_neurons, delta, device='cpu', p_mask=0.0):
         super(PoissonLikelihood, self).__init__()
