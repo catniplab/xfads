@@ -43,4 +43,20 @@ class PoissonLikelihood(nn.Module):
             return log_p_y
 
 
+class BernoulliLikelihood(nn.Module):
+    def __init__(self, readout_fn, n_neurons, device='cpu', p_mask=0.0):
+        super(BernoulliLikelihood, self).__init__()
+        self.device = device
+        self.n_neurons = n_neurons
+        self.readout_fn = readout_fn
+
+    def get_ell(self, y, z, reduce_neuron_dim=True):
+        logits = self.readout_fn(z)
+        log_p_y = -torch.nn.functional.binary_cross_entropy_with_logits(logits, y.expand([logits.shape[0]] + list(y.shape)), reduction='none')
+
+        if reduce_neuron_dim:
+            return log_p_y.sum(dim=-1)
+        else:
+            return log_p_y
+
 

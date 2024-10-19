@@ -258,7 +258,7 @@ class LightningMonkeyReaching(lightning.LightningModule):
         n_time_bins_enc = self.n_time_bins_enc
 
         p_mask_y_in_t = self.p_mask_y_in
-        p_mask_a_t = min(self.p_mask_a, self.current_epoch * self.p_mask_a / 100)
+        p_mask_a_t = min(self.p_mask_a, self.current_epoch * self.p_mask_a / 300)
         p_mask_a_t = p_mask_a_t * (1 + math.cos(2 * math.pi * self.current_epoch / 20.)) / 2.0
         p_mask_b_t = self.p_mask_b * (1 + math.cos(2 * math.pi * self.current_epoch / 17.)) / 2.0
         p_mask_apb_t = self.p_mask_apb * (1 + math.cos(2 * math.pi * self.current_epoch / 23.)) / 2.0
@@ -364,7 +364,7 @@ class LightningMonkeyReaching(lightning.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.993)
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.997)
         return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler}}
 
     def optimizer_step(self, *args, **kwargs):

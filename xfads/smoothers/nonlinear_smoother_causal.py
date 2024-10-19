@@ -38,6 +38,24 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
 
 
     @torch.jit.export
+    def forward_filter(self,
+                      y,
+                      n_samples: int,
+                      p_mask_y_in: float = 0.0,
+                      p_mask_a: float = 0.0,
+                      p_mask_b: float = 0.0,
+                      p_mask_apb: float = 0.0):
+
+        z_f, stats = self.fast_filter_1_to_T(y, n_samples, p_mask_y_in=p_mask_y_in,
+                                             p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True)
+
+        ell = self.likelihood_pdf.get_ell(y, z_f).mean(dim=0)
+        loss = stats['kl'] - ell
+        loss = loss.sum(dim=-1).mean()
+        return loss, z_f, stats
+
+
+    @torch.jit.export
     def fast_smooth_1_to_T(self,
                            y,
                            n_samples: int,
@@ -135,11 +153,29 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
 
         z_s, stats = self.fast_smooth_1_to_T(y, u, n_samples, p_mask_y_in=p_mask_y_in,
                                              p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True)
-
         ell = self.likelihood_pdf.get_ell(y, z_s).mean(dim=0)
         loss = stats['kl'] - ell
         loss = loss.sum(dim=-1).mean()
         return loss, z_s, stats
+
+    @torch.jit.export
+    def forward_filter(self,
+                      y,
+                      u,
+                      n_samples: int,
+                      p_mask_y_in: float = 0.0,
+                      p_mask_a: float = 0.0,
+                      p_mask_b: float = 0.0,
+                      p_mask_apb: float = 0.0):
+
+        z_f, stats = self.fast_filter_1_to_T(y, u, n_samples, p_mask_y_in=p_mask_y_in,
+                                             p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True)
+
+        ell = self.likelihood_pdf.get_ell(y, z_f).mean(dim=0)
+        loss = stats['kl'] - ell
+        loss = loss.sum(dim=-1).mean()
+        return loss, z_f, stats
+
 
     @torch.jit.export
     def fast_smooth_1_to_T(self,
