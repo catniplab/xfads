@@ -57,6 +57,15 @@ class LightningNonlinearSSM(lightning.LightningModule):
             
         return loss
 
+    def test_step(self, batch, batch_idx):
+        y = batch[0]
+
+        with torch.no_grad():
+            loss, z_s, stats = self.ssm(y, self.n_samples)
+            self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+        return loss
+
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
         
@@ -99,6 +108,16 @@ class LightningNonlinearSSMwithInput(LightningNonlinearSSM):
             loss, z_s, stats = self.ssm(y, u, self.n_samples)
             self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        y = batch[0]
+        u = batch[1]
+
+        with torch.no_grad():
+            loss, z_s, stats = self.ssm(y, u, self.n_samples)
+            self.log("tset_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
         return loss
 
 
