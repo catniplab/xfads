@@ -116,7 +116,7 @@ class LightningNonlinearSSMwithInput(LightningNonlinearSSM):
 
         with torch.no_grad():
             loss, z_s, stats = self.ssm(y, u, self.n_samples)
-            self.log("tset_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
         return loss
 
