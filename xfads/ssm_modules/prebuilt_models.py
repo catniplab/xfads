@@ -14,15 +14,15 @@ from xfads.smoothers.nonlinear_smoother import (
     NonlinearFilter as NonlinearFilterN,
     LowRankNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModelN,
 )
-# from xfads.smoothers.nonlinear_smoother_causal import (
-#     NonlinearFilter as NonlinearFilterC,
-#     LowRankNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModelC,
-# )
-
-from xfads.smoothers.nonlinear_smoother_causal_debug import (
+from xfads.smoothers.nonlinear_smoother_causal import (
     NonlinearFilter as NonlinearFilterC,
     LowRankNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModelC,
 )
+
+#from xfads.smoothers.nonlinear_smoother_causal_debug import (
+#    NonlinearFilter as NonlinearFilterC,
+#    LowRankNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModelC,
+#)
 
 from xfads.smoothers.nonlinear_smoother_causal import (
     NonlinearFilterWithInput as NonlinearFilterCwInput,
