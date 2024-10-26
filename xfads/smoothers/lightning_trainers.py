@@ -2,6 +2,7 @@ import math
 import time
 import copy
 import torch
+import skorch
 import xfads.utils as utils
 import xfads.prob_utils as prob_utils
 import pytorch_lightning as lightning
@@ -707,36 +708,64 @@ class LightningPendulum(lightning.LightningModule):
             self.ssm.initial_c_pdf.log_Q_0.data = torch.clip(self.ssm.initial_c_pdf.log_Q_0.data, min=log_Q_0_min)
 
     def on_validation_epoch_end(self):
-        if self.current_epoch == 0:
-            self.log("r2_valid_enc", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log("r2_valid_prd", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-
-        elif self.current_epoch > 1 and self.current_epoch % 10 == 0:
+        if self.current_epoch > 0:
             n_time_bins_enc = self.n_time_bins_enc
             m_train = torch.cat(self.train_z, dim=1).mean(dim=0)
+            n_train_trials = m_train.shape[0]
+
+            # reduce number of regressor trials for training speed
+            train_trial_dx_regress = torch.randperm(n_train_trials)[:n_train_trials//2]
+
             m_valid = torch.cat(self.valid_z, dim=1).mean(dim=0)
             veloc_train = torch.cat(self.train_veloc, dim=0)
             veloc_valid = torch.cat(self.valid_veloc, dim=0)
             n_trials, n_time_bins, n_latents = m_train.shape
             n_veloc = veloc_train.shape[-1]
 
-            clf = MLPRegressor(hidden_layer_sizes=(100,), alpha=1e-1)
-            clf.fit(m_train[:, :n_time_bins_enc].reshape(-1, n_latents).cpu(),
-                    veloc_train[:, :n_time_bins_enc].reshape(-1, n_veloc).cpu())
-            r2_valid_enc = clf.score(m_valid[:, :n_time_bins_enc].reshape(-1, n_latents).cpu(),
-                                     veloc_valid[:, :n_time_bins_enc].reshape(-1, n_veloc).cpu())
-            r2_valid_prd = clf.score(m_valid[:, n_time_bins_enc:].reshape(-1, n_latents).cpu(),
-                                     veloc_valid[:, n_time_bins_enc:].reshape(-1, n_veloc).cpu())
+            # clf = MLPRegressor(hidden_layer_sizes=(100,), alpha=1e-1)
+            # clf.fit(m_train[train_trial_dx_regress, :n_time_bins_enc].reshape(-1, n_latents).cpu(),
+            #         veloc_train[train_trial_dx_regress, :n_time_bins_enc].reshape(-1, n_veloc).cpu())
+            # r2_valid_enc = clf.score(m_valid[:, :n_time_bins_enc].reshape(-1, n_latents).cpu(),
+            #                          veloc_valid[:, :n_time_bins_enc].reshape(-1, n_veloc).cpu())
+            # r2_valid_prd = clf.score(m_valid[:, n_time_bins_enc:].reshape(-1, n_latents).cpu(),
+            #                          veloc_valid[:, n_time_bins_enc:].reshape(-1, n_veloc).cpu())
+
+            clf = skorch.regressor.NeuralNetRegressor(torch.nn.Sequential(torch.nn.Linear(n_latents, 100,
+                                                                                          device=self.cfg.device),
+                                                                          torch.nn.SiLU(),
+                                                                          torch.nn.Linear(100, n_veloc,
+                                                                                          device=self.cfg.device)),
+                                                      max_epochs=100, device=self.cfg.device,
+                                                      optimizer=torch.optim.Adam,
+                                                      optimizer__weight_decay=1e-3, optimizer__lr=1e-3, verbose=0)
+
+            # clf.fit(m_train[train_trial_dx_regress, :n_time_bins_enc].reshape(-1, n_latents),
+            #         veloc_train[train_trial_dx_regress, :n_time_bins_enc].reshape(-1, n_veloc))
+            clf.fit(m_train[train_trial_dx_regress, :n_time_bins_enc],
+                    veloc_train[train_trial_dx_regress, :n_time_bins_enc])
+
+
+            r2_valid_enc = clf.score(m_valid[:, :n_time_bins_enc].reshape(-1, n_latents).detach().cpu(),
+                                     veloc_valid[:, :n_time_bins_enc].reshape(-1, n_veloc).detach().cpu())
+            r2_valid_prd = clf.score(m_valid[:, n_time_bins_enc:].reshape(-1, n_latents).detach().cpu(),
+                                     veloc_valid[:, n_time_bins_enc:].reshape(-1, n_veloc).detach().cpu())
 
             if r2_valid_enc >= self.best_r2_enc:
                 self.best_clf_enc = copy.deepcopy(clf)
                 self.best_ssm_enc = copy.deepcopy(self.ssm)
+                self.best_r2_enc = r2_valid_enc
             if r2_valid_prd >= self.best_r2_prd:
                 self.best_clf_prd = copy.deepcopy(clf)
                 self.best_ssm_prd = copy.deepcopy(self.ssm)
+                self.best_r2_prd = r2_valid_prd
 
-            self.log("r2_valid_enc", r2_valid_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log("r2_valid_prd", r2_valid_prd, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        # except:
+        else:
+            r2_valid_enc = -1.
+            r2_valid_prd = -1.
+
+        self.log("r2_valid_enc", r2_valid_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("r2_valid_prd", r2_valid_prd, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
         self.valid_z = []
         self.train_z = []
@@ -812,7 +841,7 @@ class LightningBouncingBall(lightning.LightningModule):
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
         n_time_bins_prd = y_obs.shape[1] - n_time_bins_enc
-        
+
         with torch.no_grad():
             loss, z_s, stats = self.ssm(y_obs[:, :n_time_bins_enc], self.n_samples)
             z_prd = self.ssm.predict_forward(z_s[:, :, -1], n_time_bins_prd)
@@ -827,7 +856,7 @@ class LightningBouncingBall(lightning.LightningModule):
             self.valid_z.append(torch.cat([z_s, z_prd], dim=2))
             self.log("valid_mse", mse, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
             self.log("valid_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-        
+
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -887,41 +916,78 @@ class LightningBouncingBall(lightning.LightningModule):
                 self.ssm.dynamics_mod.mean_fn.weight.data = (U * S.clip(max=1.0)) @ VmT
 
     def on_validation_epoch_end(self):
-        if self.current_epoch == 0:
-            self.log("r2_valid_enc", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log("r2_valid_prd", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        # if self.current_epoch == 0 or self.current_epoch == (self.cfg.check_val_every_n_epoch - 1):
+        #     self.log("r2_valid_enc", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        #     self.log("r2_valid_prd", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        #
+        # elif self.current_epoch > 1 and self.current_epoch % 50 == 0:
+        # n_time_bins_enc = self.n_time_bins_enc
+        # m_train = torch.cat(self.train_z, dim=1).mean(dim=0)
+        # m_valid = torch.cat(self.valid_z, dim=1).mean(dim=0)
+        # veloc_train = torch.cat(self.train_veloc, dim=0)
+        # veloc_valid = torch.cat(self.valid_veloc, dim=0)
+        # n_trials, n_time_bins, n_latents = m_train.shape
+        # n_veloc = veloc_train.shape[-1]
 
-        elif self.current_epoch > 1 and self.current_epoch % 50 == 0:
+        # try:
+        if self.current_epoch > 0:
             n_time_bins_enc = self.n_time_bins_enc
             m_train = torch.cat(self.train_z, dim=1).mean(dim=0)
+            n_train_trials = m_train.shape[0]
+
+            # reduce number of regressor trials for training speed
+            train_trial_dx_regress = torch.randperm(n_train_trials)[:n_train_trials//5]
+
             m_valid = torch.cat(self.valid_z, dim=1).mean(dim=0)
             veloc_train = torch.cat(self.train_veloc, dim=0)
             veloc_valid = torch.cat(self.valid_veloc, dim=0)
             n_trials, n_time_bins, n_latents = m_train.shape
             n_veloc = veloc_train.shape[-1]
 
-            try:
-                clf = MLPRegressor(hidden_layer_sizes=(100,), alpha=1e-1)
-                clf.fit(m_train[:, :n_time_bins_enc].reshape(-1, n_latents).cpu(),
-                        veloc_train[:, :n_time_bins_enc].reshape(-1, n_veloc).cpu())
-                r2_valid_enc = clf.score(m_valid[:, :n_time_bins_enc].reshape(-1, n_latents).cpu(),
-                                         veloc_valid[:, :n_time_bins_enc].reshape(-1, n_veloc).cpu())
-                r2_valid_prd = clf.score(m_valid[:, n_time_bins_enc:].reshape(-1, n_latents).cpu(),
-                                         veloc_valid[:, n_time_bins_enc:].reshape(-1, n_veloc).cpu())
+            # clf = MLPRegressor(hidden_layer_sizes=(100,), alpha=1e-1)
+            # clf.fit(m_train[train_trial_dx_regress, :n_time_bins_enc].reshape(-1, n_latents).cpu(),
+            #         veloc_train[train_trial_dx_regress, :n_time_bins_enc].reshape(-1, n_veloc).cpu())
+            # r2_valid_enc = clf.score(m_valid[:, :n_time_bins_enc].reshape(-1, n_latents).cpu(),
+            #                          veloc_valid[:, :n_time_bins_enc].reshape(-1, n_veloc).cpu())
+            # r2_valid_prd = clf.score(m_valid[:, n_time_bins_enc:].reshape(-1, n_latents).cpu(),
+            #                          veloc_valid[:, n_time_bins_enc:].reshape(-1, n_veloc).cpu())
 
-                if r2_valid_enc >= self.best_r2_enc:
-                    self.best_clf_enc = copy.deepcopy(clf)
-                    self.best_ssm_enc = copy.deepcopy(self.ssm)
-                if r2_valid_prd >= self.best_r2_prd:
-                    self.best_clf_prd = copy.deepcopy(clf)
-                    self.best_ssm_prd = copy.deepcopy(self.ssm)
+            clf = skorch.regressor.NeuralNetRegressor(torch.nn.Sequential(torch.nn.Linear(n_latents, 100,
+                                                                                          device=self.cfg.device),
+                                                                          torch.nn.SiLU(),
+                                                                          torch.nn.Linear(100, n_veloc,
+                                                                                          device=self.cfg.device)),
+                                                      max_epochs=100, device=self.cfg.device,
+                                                      optimizer=torch.optim.Adam,
+                                                      optimizer__weight_decay=1e-3, optimizer__lr=1e-3, verbose=0)
 
-            except:
-                r2_valid_enc = -1.
-                r2_valid_prd = -1.
+            # clf.fit(m_train[train_trial_dx_regress, :n_time_bins_enc].reshape(-1, n_latents),
+            #         veloc_train[train_trial_dx_regress, :n_time_bins_enc].reshape(-1, n_veloc))
+            clf.fit(m_train[train_trial_dx_regress, :n_time_bins_enc],
+                    veloc_train[train_trial_dx_regress, :n_time_bins_enc])
 
-            self.log("r2_valid_enc", r2_valid_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log("r2_valid_prd", r2_valid_prd, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+            r2_valid_enc = clf.score(m_valid[:, :n_time_bins_enc].reshape(-1, n_latents).detach().cpu(),
+                                     veloc_valid[:, :n_time_bins_enc].reshape(-1, n_veloc).detach().cpu())
+            r2_valid_prd = clf.score(m_valid[:, n_time_bins_enc:].reshape(-1, n_latents).detach().cpu(),
+                                     veloc_valid[:, n_time_bins_enc:].reshape(-1, n_veloc).detach().cpu())
+
+            if r2_valid_enc >= self.best_r2_enc:
+                self.best_clf_enc = copy.deepcopy(clf)
+                self.best_ssm_enc = copy.deepcopy(self.ssm)
+                self.best_r2_enc = r2_valid_enc
+            if r2_valid_prd >= self.best_r2_prd:
+                self.best_clf_prd = copy.deepcopy(clf)
+                self.best_ssm_prd = copy.deepcopy(self.ssm)
+                self.best_r2_prd = r2_valid_prd
+
+        # except:
+        else:
+            r2_valid_enc = -1.
+            r2_valid_prd = -1.
+
+        self.log("r2_valid_enc", r2_valid_enc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("r2_valid_prd", r2_valid_prd, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
         self.valid_z = []
         self.train_z = []
