@@ -16,6 +16,7 @@ class GaussianLikelihood(nn.Module):
         self.readout_fn = readout_fn
 
         if fix_R:
+            self.register_buffer('R_diag', torch.tensor(R_diag))
             self.log_R = utils.softplus_inv(R_diag)
         else:
             self.log_R = torch.nn.Parameter(utils.softplus_inv(R_diag))
