@@ -6,8 +6,8 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as Fn
 
-from xfads.linalg_utils import bmv, bip, bop
 from sklearn.linear_model import Ridge
+from xfads.linalg_utils import bmv, bip, bop
 
 
 class DynamicsGRU(torch.nn.Module):
@@ -18,8 +18,11 @@ class DynamicsGRU(torch.nn.Module):
         self.latent_dim = latent_dim
 
         self.gru_cell = nn.GRUCell(0, hidden_dim, device=device).to(device)
+        # self.h_to_z = nn.Linear(hidden_dim, latent_dim, device=device, bias=False).to(device)
+        # self.z_to_h = nn.Linear(latent_dim, hidden_dim, device=device, bias=False).to(device)
         self.h_to_z = nn.Linear(hidden_dim, latent_dim, device=device).to(device)
         self.z_to_h = nn.Linear(latent_dim, hidden_dim, device=device).to(device)
+
 
     def forward(self, z):
         h_in = self.z_to_h(z)
@@ -302,3 +305,20 @@ def propagate_latent_k_steps(z, dynamics_mod, k_steps):
                          + torch.sqrt(Q) * torch.randn_like(z_out[:, :, k - 1]).to(z.device)
 
     return z_out
+
+
+
+class LowRankRegressor(nn.Module):
+    def __init__(self, N, T, rank_n, rank_t, device='cpu'):
+        super(LowRankRegressor, self).__init__()
+
+        self.rank_n = rank_n
+        self.rank_t = rank_t
+
+        self.A = nn.Parameter(torch.rand((rank_t, T), device=device))
+        self.B = nn.Parameter(torch.rand((N, rank_n), device=device))
+        self.c = nn.Parameter(torch.rand(1, device=device))
+
+    def forward(self, x):
+        return torch.sum(self.A @ x @ self.B, dim=[-2, -1]) + self.c
+

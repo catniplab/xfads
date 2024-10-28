@@ -763,11 +763,14 @@ class LightningPendulum(lightning.LightningModule):
             clf.fit(m_train[train_trial_dx_regress, :n_time_bins_enc],
                     veloc_train[train_trial_dx_regress, :n_time_bins_enc])
 
-
+            # try:
             r2_valid_enc = clf.score(m_valid[:, :n_time_bins_enc].reshape(-1, n_latents).detach().cpu(),
                                      veloc_valid[:, :n_time_bins_enc].reshape(-1, n_veloc).detach().cpu())
             r2_valid_prd = clf.score(m_valid[:, n_time_bins_enc:].reshape(-1, n_latents).detach().cpu(),
                                      veloc_valid[:, n_time_bins_enc:].reshape(-1, n_veloc).detach().cpu())
+            # except:
+            #     r2_valid_enc = -1.
+            #     r2_valid_prd = -1.
 
             if r2_valid_enc >= self.best_r2_enc:
                 self.best_clf_enc = copy.deepcopy(clf)

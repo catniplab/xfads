@@ -29,10 +29,11 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
                 p_mask_y_in: float = 0.0,
                 p_mask_a: float = 0.0,
                 p_mask_b: float = 0.0,
-                p_mask_apb: float = 0.0):
+                p_mask_apb: float = 0.0,
+                get_P_s: bool = False):
 
         z_s, stats = self.fast_smooth_1_to_T(y, n_samples, p_mask_y_in=p_mask_y_in,
-                                             p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True)
+                                             p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True, get_P_s=get_P_s)
 
         ell = self.likelihood_pdf.get_ell(y, z_s).mean(dim=0)
         loss = stats['kl'] - ell
@@ -66,7 +67,8 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
                            p_mask_y_in: float = 0.0,
                            p_mask_b: float = 0.0,
                            get_kl: bool = False,
-                           get_v: bool = False):
+                           get_v: bool = False,
+                           get_P_s: bool = False):
 
         device = y.device
         n_trials, n_time_bins, n_neurons = y.shape
@@ -85,7 +87,7 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         k_b = t_mask_b[..., None] * k_b
         K_b = t_mask_b[..., None, None] * K_b
 
-        z_s, stats = self.nl_filter(k_y, K_y, k_b, K_b, n_samples, get_kl=get_kl)
+        z_s, stats = self.nl_filter(k_y, K_y, k_b, K_b, n_samples, get_kl=get_kl, get_P_s=get_P_s)
         return z_s, stats
 
     @torch.jit.export
@@ -265,6 +267,27 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         return z_forward
 
 
+def get_P_s_t(Q_diag, M_p_c_t, K_a, K_b):
+    # TODO: optimize order of operations
+    K = torch.cat([K_a, K_b], dim=-1)
+    P_p_t = M_p_c_t @ M_p_c_t.mT + torch.diag(Q_diag)
+    I_pl_triple = torch.eye(K.shape[-1]) + K.mT @ P_p_t @ K
+    Psi_t = linalg_utils.triangular_inverse(torch.linalg.cholesky(I_pl_triple)).mT
+    P_s_t = P_p_t - P_p_t @ K @ Psi_t @ Psi_t.mT @ K.mT @ P_p_t
+
+    return P_s_t
+
+
+def get_P_s_1(Q_0_diag, K_a, K_b):
+    # TODO: optimize order of operations
+    P_p_t = torch.diag(Q_0_diag)
+    K = torch.cat([K_a, K_b], dim=-1)
+    I_pl_triple = torch.eye(K.shape[-1]) + K.mT @ P_p_t @ K
+    Psi_t = linalg_utils.triangular_inverse(torch.linalg.cholesky(I_pl_triple)).mT
+    P_s_t = P_p_t - P_p_t @ K @ Psi_t @ Psi_t.mT @ K.mT @ P_p_t
+    return P_s_t
+
+
 @apply_memory_cleanup
 class NonlinearFilter(nn.Module):
     def __init__(self, dynamics_mod, initial_c_pdf, device):
@@ -281,7 +304,8 @@ class NonlinearFilter(nn.Module):
                 K_b: torch.Tensor,
                 n_samples: int,
                 get_kl: bool=False,
-                p_mask: float=0.0):
+                p_mask: float=0.0,
+                get_P_s: bool=False):
 
         n_trials, n_time_bins, n_latents, rank_y = K_y.shape
 
@@ -293,6 +317,10 @@ class NonlinearFilter(nn.Module):
         z_s = []
         Psi_f = []
         Psi_p = []
+        M_p_f_c = []
+
+        if get_P_s:
+            P_s = []
 
         Q_diag = Fn.softplus(self.dynamics_mod.log_Q)
         stats = {}
@@ -305,6 +333,9 @@ class NonlinearFilter(nn.Module):
                 z_f_t, m_f_t, m_p_t, Psi_f_t, h_f_t = fast_filter_step_0(m_0, k_y[:, 0], K_y[:, 0], Q_0_diag, n_samples)
                 m_s_t, z_s_t, Psi_s_t = fast_update_filtering_to_smoothing_stats_0(z_f_t, h_f_t, m_f_t, Psi_f_t, k_b[:, t], K_b[:, t], K_y[:, t], Q_0_diag)
                 kl_t = low_rank_kl_step_0(m_s_t, m_0, Q_0_diag, Q_diag, K_y[:, 0], K_b[:, 0], Psi_f_t, Psi_s_t)
+
+                if get_P_s:
+                    P_s.append(get_P_s_1(Q_0_diag, K_y[:, 0], K_b[:, 0]))
             else:
                 m_fn_z_f_tm1 = self.dynamics_mod.mean_fn(z_f[t-1]).movedim(0, -1)
                 m_fn_z_s_tm1 = self.dynamics_mod.mean_fn(z_s[t-1]).movedim(0, -1)
@@ -312,6 +343,9 @@ class NonlinearFilter(nn.Module):
                 m_s_t, z_s_t, Psi_s_t = fast_update_filtering_to_smoothing_stats_t(z_f_t, h_f_t, m_f_t, Psi_f_t, M_p_c_t, k_b[:, t], K_b[:, t], K_y[:, t], Q_diag)
                 _, m_s_p_t, _, M_s_p_c_t, Psi_s_p_t = fast_predict_step(m_fn_z_s_tm1, Q_diag)
                 kl_t = low_rank_kl_step_t(m_s_t, m_s_p_t, M_p_c_t, M_s_p_c_t, K_y[:, t], K_b[:, t], Psi_p_t, Psi_f_t, Psi_s_p_t, Psi_s_t, Q_diag)
+
+                if get_P_s:
+                    P_s.append(get_P_s_t(Q_diag, M_p_c_t, K_y[:, t], K_b[:, t]))
 
             kl.append(kl_t)
             z_s.append(z_s_t)
@@ -329,6 +363,9 @@ class NonlinearFilter(nn.Module):
         stats['m_p'] = torch.stack(m_p, dim=1)
         stats['Psi_f'] = torch.stack(Psi_f, dim=1)
         stats['Psi_p'] = torch.stack(Psi_p, dim=1)
+
+        if get_P_s:
+            stats['P_s'] = torch.stack(P_s, dim=1)
 
         return z_s, stats
 

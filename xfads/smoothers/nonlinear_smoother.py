@@ -302,7 +302,8 @@ class NonlinearFilter(nn.Module):
                 n_samples: int,
                 get_v: bool=False,
                 get_kl: bool=False,
-                p_mask: float=0.0):
+                p_mask: float=0.0,
+                get_P_s: bool=False):
 
         # mask data, 0: data available, 1: data missing
         n_trials, n_time_bins, n_latents, rank = K.shape
@@ -311,6 +312,9 @@ class NonlinearFilter(nn.Module):
         m_f = []
         z_f = []
         stats = {}
+
+        if get_P_s:
+            P_s = []
 
         Q_diag = Fn.softplus(self.dynamics_mod.log_Q)
         Q_sqrt_diag = torch.sqrt(Q_diag)
@@ -325,12 +329,19 @@ class NonlinearFilter(nn.Module):
                 if get_kl:
                     kl.append(low_rank_kl_step_0(m_f_t, m_p_t, P_p_diag, K[:, 0], Psi_f_t))
 
+                if get_P_s:
+                    P_s.append(get_P_s_1(P_p_diag, K[:, 0]))
+
             else:
                 m_fn_z_tm1 = self.dynamics_mod.mean_fn(z_f[t-1]).movedim(0, -1)
                 z_f_t, m_f_t, m_p_t, M_p_c_t, Psi_f_t, Psi_p_t = fast_filter_step_t(m_fn_z_tm1, k[:, t], K[:, t], Q_diag, torch.tensor(False))
 
                 if get_kl:
                     kl.append(low_rank_kl_step_t(m_f_t, m_p_t, M_p_c_t, K[:, t], Psi_f_t, Psi_p_t, Q_inv_diag, Q_sqrt_diag))
+
+                if get_P_s:
+                    P_s.append(get_P_s_t(Q_diag, M_p_c_t, K[:, t]))
+
 
             m_f.append(m_f_t)
             z_f.append(z_f_t)
@@ -340,6 +351,9 @@ class NonlinearFilter(nn.Module):
 
         if get_kl:
             stats['kl'] = torch.stack(kl, dim=1)
+
+        if get_P_s:
+            stats['P_s'] = torch.stack(P_s, dim=1)
 
         return z_f, stats
 
@@ -398,6 +412,26 @@ class NonlinearFilterSmallL(nn.Module):
         stats['kl'] = kl
 
         return z_f, stats
+
+
+def get_P_s_t(Q_diag, M_p_c_t, K):
+    # TODO: optimize order of operations
+    P_p_t = M_p_c_t @ M_p_c_t.mT + torch.diag(Q_diag)
+    I_pl_triple = torch.eye(K.shape[-1]) + K.mT @ P_p_t @ K
+    Psi_t = linalg_utils.triangular_inverse(torch.linalg.cholesky(I_pl_triple)).mT
+    P_s_t = P_p_t - P_p_t @ K @ Psi_t @ Psi_t.mT @ K.mT @ P_p_t
+
+    return P_s_t
+
+
+def get_P_s_1(Q_0_diag, K):
+    # TODO: optimize order of operations
+    P_p_t = torch.diag(Q_0_diag)
+    I_pl_triple = torch.eye(K.shape[-1]) + K.mT @ P_p_t @ K
+    Psi_t = linalg_utils.triangular_inverse(torch.linalg.cholesky(I_pl_triple)).mT
+    P_s_t = P_p_t - P_p_t @ K @ Psi_t @ Psi_t.mT @ K.mT @ P_p_t
+    return P_s_t
+
 
 
 """big L"""
