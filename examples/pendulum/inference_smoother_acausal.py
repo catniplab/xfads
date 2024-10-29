@@ -18,7 +18,7 @@ def main():
     torch.cuda.empty_cache()
     initialize(version_base=None, config_path="", job_name="pendulum")
     cfg = compose(config_name="config")
-    seeds = [1234, 1235, 1236, 1237]
+    seeds = [1234, 1235, 1236]
 
     """config"""
     for seed in seeds:
