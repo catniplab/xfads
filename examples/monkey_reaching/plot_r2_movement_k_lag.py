@@ -21,7 +21,7 @@ def main():
     cfg = compose(config_name="config")
     cfg.data_device = 'cpu'
     cfg.device = 'cpu'
-    n_bins_bhv=10
+    n_bins_bhv = 10
 
     lightning.seed_everything(cfg.seed, workers=True)
     torch.set_default_dtype(torch.float32)
@@ -78,7 +78,7 @@ def main():
                                           local_encoder, nl_filter, device=cfg.device)
 
     """lightning"""
-    best_model_path = 'results/causal_model.ckpt'
+    best_model_path = 'ckpts/smoother/causal_mask_0.0/epoch=827_valid_loss=1415.56_r2_valid_enc=0.89_r2_valid_bhv=0.00_valid_bps_enc=0.42.ckpt'
     seq_vae = LightningMonkeyReaching.load_from_checkpoint(best_model_path, ssm=ssm, cfg=cfg,
                                                            n_time_bins_enc=n_time_bins_enc, n_time_bins_bhv=n_bins_bhv,
                                                            strict=False)
