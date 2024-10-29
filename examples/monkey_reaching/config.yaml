@@ -8,7 +8,7 @@ rank_backward: 5
 n_hidden_dynamics: 128
 
 # --- inference network --- #
-n_samples: 25
+n_samples: 22
 n_hidden_local: 256
 n_hidden_backward: 128
 
@@ -22,8 +22,8 @@ p_local_dropout: 0.4
 p_backward_dropout: 0.0
 
 # --- training --- #
-device: 'cpu'
-data_device: 'cpu'
+device: 'cuda'
+data_device: 'cuda'
 
 lr: 1e-3
 n_epochs: 1000

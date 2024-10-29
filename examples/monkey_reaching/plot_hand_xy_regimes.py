@@ -1,24 +1,14 @@
-import torch
 import numpy as np
-import matplotlib.pyplot as plt
-import torch.nn.functional as Fn
-import xfads.prob_utils as prob_utils
-import pytorch_lightning as lightning
-
-from matplotlib import cm
-from hydra import compose, initialize
-from pyrecorder.recorder import Recorder
-from pyrecorder.writers.video import Video
-from matplotlib.animation import FuncAnimation
-from pyrecorder.converters.matplotlib import Matplotlib
 import torch
 import torch.nn as nn
 import xfads.utils as utils
 import matplotlib.pyplot as plt
+import torch.nn.functional as Fn
 import xfads.prob_utils as prob_utils
 import xfads.plot_utils as plot_utils
 import pytorch_lightning as lightning
 
+from matplotlib import cm
 from hydra import compose, initialize
 from sklearn.linear_model import Ridge
 from xfads.ssm_modules.likelihoods import PoissonLikelihood
@@ -38,7 +28,7 @@ def main():
     cfg = compose(config_name="config")
     cfg.data_device = 'cpu'
     cfg.device = 'cpu'
-    n_bins_bhv=0
+    n_bins_bhv = 10
 
     lightning.seed_everything(cfg.seed, workers=True)
     torch.set_default_dtype(torch.float32)
@@ -97,7 +87,7 @@ def main():
                                           local_encoder, nl_filter, device=cfg.device)
 
     """lightning"""
-    best_model_path = 'results/causal_model.ckpt'
+    best_model_path = 'ckpts/smoother/causal_mask_0.0/epoch=827_valid_loss=1415.56_r2_valid_enc=0.89_r2_valid_bhv=0.00_valid_bps_enc=0.42.ckpt'
     seq_vae = LightningMonkeyReaching.load_from_checkpoint(best_model_path, ssm=ssm, cfg=cfg,
                                                            n_time_bins_enc=n_time_bins_enc, n_time_bins_bhv=n_bins_bhv,
                                                            strict=False)
@@ -110,8 +100,8 @@ def main():
     z_f_test = []
     z_p_test = []
 
-    m_0 = seq_vae.ssm.dynamics_mod.initial_c_pdf.m_0
-    Q_0 = Fn.softplus(seq_vae.ssm.dynamics_mod.initial_c_pdf.log_Q_0)
+    m_0 = seq_vae.ssm.initial_c_pdf.m_0
+    Q_0 = Fn.softplus(seq_vae.ssm.initial_c_pdf.log_Q_0)
     z_ic = m_0 + Q_0.sqrt() * torch.randn(batch_sz_test + [cfg.n_latents], device=cfg.device)
     z_ic_p = seq_vae.ssm.predict_forward(z_ic, 35 - n_bins_bhv)
 
