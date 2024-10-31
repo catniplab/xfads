@@ -151,7 +151,7 @@ def build_gru_dynamics_function(dim_input, dim_hidden, d_type=torch.float32, dev
 
 def softplus_inv(x):
     if isinstance(x, torch.Tensor):
-        return torch.log(torch.exp(x) - 1 + 1e-10)
+        return x + torch.log(-torch.expm1(-x))
     else:
         return np.log(np.exp(x) - 1 + 1e-10)
 
