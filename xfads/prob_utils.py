@@ -105,3 +105,33 @@ def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
     P_p = torch.stack(P_p, dim=1)
 
     return m_f, P_f, m_p, P_p
+
+
+def kl_diagonal_gaussian_canon(m_f, P_f_diag, m_p, P_p_diag):
+    kl = 0.5 * torch.log(P_p_diag / P_f_diag) + 0.5 * (P_f_diag + (m_f - m_p) ** 2) / P_p_diag - 0.5
+    kl = kl.sum(dim=-1)
+    return kl
+
+
+def linear_gaussian_ell(y, C, b, R_diag, m, P):
+    R_inv_diag = 1 / R_diag
+    diff = y - bmv(C, m) - b
+
+    qp = bip(diff, R_inv_diag * diff)
+    logdet = torch.sum(torch.log(R_diag))
+    tr = torch.einsum('...ii -> ...', (C.mT * R_inv_diag) @ C @ P)
+    const = y.shape[-1] * math.log(2 * math.pi)
+
+    ell = -0.5 * (qp + tr + logdet + const)
+
+    return ell
+
+
+def kl_dense_gaussian_full_rank(m_f, P_f_chol, m_p, P_p_chol):
+    tr = torch.einsum('...ii -> ...', torch.cholesky_solve(P_f_chol @ P_f_chol.mT, P_p_chol))
+    logdet1 = 2 * torch.sum(torch.log(torch.diagonal(P_f_chol, dim1=-2, dim2=-1)), dim=-1)
+    logdet2 = 2 * torch.sum(torch.log(torch.diagonal(P_p_chol, dim1=-2, dim2=-1)), dim=-1)
+    qp = bip(m_f - m_p, chol_bmv_solve(P_p_chol, m_f - m_p))
+    kl = 0.5 * (tr + qp + logdet2 - logdet1 - m_f.shape[-1])
+
+    return kl

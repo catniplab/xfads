@@ -38,7 +38,7 @@ def plot_z_samples(fig, axs, samples, color_map_list):
      for i in range(n_trials) for j in range(samples.shape[0]) for n in range(n_neurons)]
 
     [axs[i].set_xlim(0, n_bins) for i in range(n_trials)]
-    [axs[i].set_ylim(-10, 10) for i in range(n_trials)]
+    [axs[i].set_ylim(-20, 28) for i in range(n_trials)]
     fig.tight_layout()
 
 

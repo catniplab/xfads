@@ -14,20 +14,28 @@ class LocalEncoderLRMvn(nn.Module):
         self.rank = rank
         self.n_latents = n_latents
         self.n_latents_read = n_latents_read
+        self.n_latents_unread = n_latents - n_latents_read
 
         self.mlp = nn.Sequential(nn.Linear(input_size, hidden_size, device=device),
                                  nn.SiLU(),
                                  nn.Dropout(dropout),
-                                 nn.Linear(hidden_size, (rank + 1) * n_latents, device=device)).to(device)
+                                 # nn.Linear(hidden_size, (rank + 1) * n_latents, device=device)).to(device)
+                                 nn.Linear(hidden_size, (rank + 1) * n_latents_read, device=device)).to(device)
 
     def forward(self, y):
         h_log_J = self.mlp(y)
-        h = h_log_J[..., :self.n_latents]
-        L_vec = h_log_J[..., self.n_latents:]
-        L = L_vec.view(y.shape[0], y.shape[1], self.n_latents, -1)
+        # h = h_log_J[..., :self.n_latents]
+        h = h_log_J[..., :self.n_latents_read]
+        # L_vec = h_log_J[..., self.n_latents:]
+        L_vec = h_log_J[..., self.n_latents_read:]
+        L = L_vec.view(y.shape[0], y.shape[1], self.n_latents_read, -1)
+        # L = L_vec.view(y.shape[0], y.shape[1], self.n_latents, -1)
 
-        # h[..., self.n_latents_read:] = 0.0
-        # L[..., self.n_latents_read:, :] = 0.0
+        h = torch.nn.functional.pad(h, (0, self.n_latents_unread), mode='constant', value=0.0)
+        L = torch.nn.functional.pad(L, (0, 0, 0, self.n_latents_unread), mode='constant', value=0.0)
+
+        # h[..., self.n_latents_read:] = h[..., self.n_latents_read:] * 0.0
+        # L[..., self.n_latents_read:, :] = L[..., self.n_latents_read:, :] * 0.0
 
         return h, L
 
