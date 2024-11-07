@@ -29,7 +29,8 @@ class LightningNonlinearSSM(lightning.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=cfg.lr_gamma_decay)
+        return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler}}
 
     def training_step(self, batch, batch_idx):
         y = batch[0]
@@ -204,7 +205,8 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=cfg.lr_gamma_decay)
+        return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler}}
 
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
@@ -397,7 +399,7 @@ class LightningMonkeyReaching(lightning.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.997)
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=cfg.lr_gamma_decay)
         return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler}}
 
     def optimizer_step(self, *args, **kwargs):
@@ -714,7 +716,8 @@ class LightningPendulum(lightning.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=cfg.lr_gamma_decay)
+        return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler}}
 
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
@@ -920,7 +923,8 @@ class LightningBouncingBall(lightning.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=cfg.lr_gamma_decay)
+        return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler}}
 
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
