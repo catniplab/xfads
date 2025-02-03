@@ -1,7 +1,9 @@
 name: xfads
+channel_priority: flexible
 channels:
   - pytorch
   - defaults
+  - conda-forge
 dependencies:
   - blas=1.0
   - bzip2=1.0.8
