@@ -2,12 +2,13 @@ import copy
 import math
 import torch
 import einops
+import prob_utils
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as Fn
 
 from sklearn.linear_model import Ridge
-from xfads.linalg_utils import bmv, bip, bop
+from xfads.linalg_utils import bmv, bip, bop, chol_bmv_solve
 
 
 class DynamicsGRU(torch.nn.Module):
@@ -322,3 +323,67 @@ class LowRankRegressor(nn.Module):
     def forward(self, x):
         return torch.sum(self.A @ x @ self.B, dim=[-2, -1]) + self.c
 
+
+def fit_pfa_model(bin_sz, n_obs, n_latents, y, device, batch_sz, n_epoch):
+    n_trials, _, n_neurons = y.shape
+    dataset = torch.utils.data.TensorDataset(y)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_sz, shuffle=True)
+
+    b_hat = prob_utils.estimate_poisson_rate_bias(y, bin_sz).clip(min=-5)
+    y_nrm = y - bin_sz * torch.exp(b_hat)
+    _, S, VmT = torch.linalg.svd(y_nrm.reshape(-1, n_neurons), full_matrices=False)
+
+    pfa = PoissonFA(bin_sz, n_obs, n_latents, device)
+    pfa.readout_fn.weight.data = VmT.mT[:, :n_latents] * S[:n_latents] / S[:n_latents].max()
+    pfa.readout_fn.bias.data = b_hat
+    opt = torch.optim.Adam(pfa.parameters(), lr=1e-3)
+    z_hat = []
+
+    for i in range(n_epoch):
+        for batch in dataloader:
+            opt.zero_grad()
+            loss, stats = pfa(batch[0])
+            loss += torch.linalg.svdvals(pfa.readout_fn.weight.data).pow(2).sum()
+            loss.backward()
+            opt.step()
+
+            pfa.readout_fn.bias.data = pfa.readout_fn.bias.data.clip(min=-5, max=8)
+
+            if i == n_epoch - 1:
+                z_hat.append(stats['m'])
+
+    z_hat = torch.cat(z_hat, dim=0).detach()
+    return pfa, z_hat
+
+
+class PoissonFA(torch.nn.Module):
+    def __init__(self, bin_sz, n_obs, n_latents, device):
+        super().__init__()
+        self.n_obs = n_obs
+        self.n_latents = n_latents
+
+        self.bin_sz = bin_sz
+        self.device = device
+
+        self.readout_fn = nn.Linear(n_latents, n_obs, device=device)
+
+    def forward(self, y):
+        b = self.readout_fn.bias
+        C = self.readout_fn.weight
+
+        exp_b = self.bin_sz * torch.exp(b)
+        P_inv = torch.eye(self.n_latents, device=self.device) + exp_b * C.mT @ C
+        P_inv_chol = torch.linalg.cholesky(P_inv)
+        m = chol_bmv_solve(P_inv_chol, bmv(C.mT, y - exp_b))
+        P = torch.cholesky_inverse(P_inv_chol)
+
+        diag_CPC = torch.diag(C @ P @ C.mT)
+        log_rate_hat = self.readout_fn(m)
+        ell = y * log_rate_hat - self.bin_sz * torch.exp(log_rate_hat + 0.5 * diag_CPC)
+        tr = torch.einsum('...ii -> ...', P)
+        kl = 0.5 * (tr + bip(m, m) + 2 * torch.sum(torch.log(torch.diag(P_inv_chol))))
+
+        loss = kl - ell.sum(dim=-1)
+        loss = loss.mean()
+        stats = {'m': m, 'P': P}
+        return loss, stats
