@@ -99,7 +99,9 @@ def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_da
                                       device=cfg.device, dropout=cfg.p_local_dropout)
 
     """input encoder"""
-    input_encoder = nn.Linear(n_inputs, cfg.n_latents, bias=False)
+    input_encoder = nn.Sequential(nn.Linear(n_inputs, cfg.n_latents, bias=False, device=cfg.device),
+                                  nn.LayerNorm(cfg.n_latents, bias=False, device=cfg.device)
+                                  )
 
     """sequential vae"""
     if model_type == 'n':
