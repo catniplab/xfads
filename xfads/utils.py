@@ -10,18 +10,33 @@ from sklearn.linear_model import Ridge
 from xfads.linalg_utils import bmv, bip, bop
 
 
+
+class RMSNorm(nn.Module):
+    def __init__(self, d_model: int, eps: float = 1e-5, device: str = 'cpu'):
+        super().__init__()
+
+        self.eps = eps
+
+    def forward(self, x):
+        output = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+        return output
+
+
 class DynamicsGRU(torch.nn.Module):
-    def __init__(self, hidden_dim, latent_dim, device):
+    def __init__(self, hidden_dim, latent_dim, device, use_layer_norm=False):
         super(DynamicsGRU, self).__init__()
         self.device = device
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
 
         self.gru_cell = nn.GRUCell(0, hidden_dim, device=device).to(device)
-        # self.h_to_z = nn.Linear(hidden_dim, latent_dim, device=device, bias=False).to(device)
-        # self.z_to_h = nn.Linear(latent_dim, hidden_dim, device=device, bias=False).to(device)
         self.h_to_z = nn.Linear(hidden_dim, latent_dim, device=device).to(device)
         self.z_to_h = nn.Linear(latent_dim, hidden_dim, device=device).to(device)
+
+        self.use_layer_norm = use_layer_norm
+
+        if use_layer_norm:
+            self.layer_norm = RMSNorm(latent_dim, device=device)
 
 
     def forward(self, z):
@@ -32,8 +47,13 @@ class DynamicsGRU(torch.nn.Module):
         empty_vec = torch.empty((h_in.shape[0], 0), device=z.device)
         h_out = self.gru_cell(empty_vec, h_in)
         h_out = h_out.reshape(h_in_shape + [self.hidden_dim])
-        z_out = self.h_to_z(h_out)
-        return z_out
+        residual = self.h_to_z(h_out)
+
+        if self.use_layer_norm:
+            out = self.layer_norm(z + residual)
+        else:
+            out = z + residual
+        return out
 
 
 class DynamicsQuadSaddle(torch.nn.Module):
@@ -144,8 +164,8 @@ class VdpDynamicsModel(nn.Module):
         return z_tp1
 
 
-def build_gru_dynamics_function(dim_input, dim_hidden, d_type=torch.float32, device='cpu'):
-    gru_dynamics = DynamicsGRU(dim_hidden, dim_input, device)
+def build_gru_dynamics_function(dim_input, dim_hidden, d_type=torch.float32, device='cpu', use_layer_norm=False):
+    gru_dynamics = DynamicsGRU(dim_hidden, dim_input, device, use_layer_norm=use_layer_norm)
     return gru_dynamics
 
 

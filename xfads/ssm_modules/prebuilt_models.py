@@ -83,7 +83,8 @@ def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_da
 
     """dynamics module"""
     Q_diag = 1. * torch.ones(cfg.n_latents, device=cfg.device)
-    dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics, device=cfg.device)
+    dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics,
+                                                    device=cfg.device, use_layer_norm=cfg.use_layer_norm)
     dynamics_mod = DenseGaussianDynamics(dynamics_fn, cfg.n_latents, Q_diag, device=cfg.device)
 
     """initial condition"""
