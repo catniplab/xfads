@@ -4,7 +4,8 @@ version = "0.7.1"
 description = "eXponential Family Dynamical Systems"
 authors = []
 dependencies = [
-    "torch>=2.2.0",
+    "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "torch>=2.6; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "numpy>=1.26.4",
     "scipy>=1.13.1",
     "tqdm>=4.66.4",
@@ -20,7 +21,7 @@ dependencies = [
     "skorch==1.0.0"
 ]
 readme = "README.md"
-requires-python = ">= 3.8"
+requires-python = ">= 3.11"
 
 [build-system]
 requires = ["hatchling"]
