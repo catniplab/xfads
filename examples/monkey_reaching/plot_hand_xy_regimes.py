@@ -15,8 +15,11 @@ from xfads.ssm_modules.likelihoods import PoissonLikelihood
 from xfads.ssm_modules.dynamics import DenseGaussianDynamics
 from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
 from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
-from xfads.smoothers.lightning_trainers import LightningNonlinearSSM, LightningMonkeyReaching
-from xfads.smoothers.nonlinear_smoother_causal import NonlinearFilter, LowRankNonlinearStateSpaceModel
+from xfads.smoothers.lightning_trainers import LightningMonkeyReaching
+from xfads.smoothers.nonlinear_smoother_causal import (
+    NonlinearFilter,
+    LowRankNonlinearStateSpaceModel,
+)
 
 
 def main():
@@ -26,71 +29,101 @@ def main():
     torch.cuda.empty_cache()
     initialize(version_base=None, config_path="", job_name="monkey_reaching")
     cfg = compose(config_name="config")
-    cfg.data_device = 'cpu'
-    cfg.device = 'cpu'
+    cfg.data_device = "cpu"
+    cfg.device = "cpu"
     n_bins_bhv = 10
 
     lightning.seed_everything(cfg.seed, workers=True)
     torch.set_default_dtype(torch.float32)
 
     """data"""
-    data_path = 'data/data_{split}_{bin_sz_ms}ms.pt'
-    train_data = torch.load(data_path.format(split='train', bin_sz_ms=cfg.bin_sz_ms))
-    val_data = torch.load(data_path.format(split='test', bin_sz_ms=cfg.bin_sz_ms))
-    test_data = torch.load(data_path.format(split='test', bin_sz_ms=cfg.bin_sz_ms))
+    data_path = "data/data_{split}_{bin_sz_ms}ms.pt"
+    train_data = torch.load(data_path.format(split="train", bin_sz_ms=cfg.bin_sz_ms))
+    val_data = torch.load(data_path.format(split="test", bin_sz_ms=cfg.bin_sz_ms))
+    test_data = torch.load(data_path.format(split="test", bin_sz_ms=cfg.bin_sz_ms))
 
-    y_valid_obs = val_data['y_obs'].type(torch.float32).to(cfg.data_device)[:, :35]
-    y_train_obs = train_data['y_obs'].type(torch.float32).to(cfg.data_device)[:, :35]
-    y_test_obs = test_data['y_obs'].type(torch.float32).to(cfg.data_device)[:, :35]
-    vel_valid = val_data['velocity'].type(torch.float32).to(cfg.data_device)
-    vel_train = train_data['velocity'].type(torch.float32).to(cfg.data_device)
-    vel_test = test_data['velocity'].type(torch.float32).to(cfg.data_device)
+    y_valid_obs = val_data["y_obs"].type(torch.float32).to(cfg.data_device)[:, :35]
+    y_train_obs = train_data["y_obs"].type(torch.float32).to(cfg.data_device)[:, :35]
+    y_test_obs = test_data["y_obs"].type(torch.float32).to(cfg.data_device)[:, :35]
+    vel_valid = val_data["velocity"].type(torch.float32).to(cfg.data_device)
+    vel_train = train_data["velocity"].type(torch.float32).to(cfg.data_device)
+    vel_test = test_data["velocity"].type(torch.float32).to(cfg.data_device)
     n_trials, n_time_bins, n_neurons_obs = y_train_obs.shape
-    n_time_bins_enc = train_data['n_time_bins_enc']
+    n_time_bins_enc = train_data["n_time_bins_enc"]
     batch_sz_test = list(y_test_obs.shape)[:-1]
     n_trials_test = y_test_obs.shape[0]
 
     y_train_dataset = torch.utils.data.TensorDataset(y_train_obs, vel_train)
     y_val_dataset = torch.utils.data.TensorDataset(y_valid_obs, vel_valid)
     y_test_dataset = torch.utils.data.TensorDataset(y_test_obs, vel_test)
-    train_dataloader = torch.utils.data.DataLoader(y_train_dataset, batch_size=cfg.batch_sz, shuffle=False)
-    valid_dataloader = torch.utils.data.DataLoader(y_val_dataset, batch_size=y_valid_obs.shape[0], shuffle=False)
-    test_dataloader = torch.utils.data.DataLoader(y_test_dataset, batch_size=y_valid_obs.shape[0], shuffle=False)
+    train_dataloader = torch.utils.data.DataLoader(
+        y_train_dataset, batch_size=cfg.batch_sz, shuffle=False
+    )
+    valid_dataloader = torch.utils.data.DataLoader(
+        y_val_dataset, batch_size=y_valid_obs.shape[0], shuffle=False
+    )
+    test_dataloader = torch.utils.data.DataLoader(
+        y_test_dataset, batch_size=y_valid_obs.shape[0], shuffle=False
+    )
 
     """likelihood pdf"""
     H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
     readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs))
-    readout_fn[-1].bias.data = prob_utils.estimate_poisson_rate_bias(train_dataloader, cfg.bin_sz)
-    likelihood_pdf = PoissonLikelihood(readout_fn, n_neurons_obs, cfg.bin_sz, device=cfg.device)
+    readout_fn[-1].bias.data = prob_utils.estimate_poisson_rate_bias(
+        train_dataloader, cfg.bin_sz
+    )
+    likelihood_pdf = PoissonLikelihood(readout_fn, n_neurons_obs, cfg.bin_sz)
 
     """dynamics module"""
-    Q_diag = 1. * torch.ones(cfg.n_latents, device=cfg.device)
-    dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics, device=cfg.device)
-    dynamics_mod = DenseGaussianDynamics(dynamics_fn, cfg.n_latents, Q_diag, device=cfg.device)
+    Q_diag = 1.0 * torch.ones(cfg.n_latents)
+    dynamics_fn = utils.build_gru_dynamics_function(
+        cfg.n_latents, cfg.n_hidden_dynamics
+    )
+    dynamics_mod = DenseGaussianDynamics(dynamics_fn, cfg.n_latents, Q_diag)
 
     """initial condition"""
-    m_0 = torch.zeros(cfg.n_latents, device=cfg.device)
-    Q_0_diag = 1. * torch.ones(cfg.n_latents, device=cfg.device)
-    initial_condition_pdf = DenseGaussianInitialCondition(cfg.n_latents, m_0, Q_0_diag, device=cfg.device)
+    m_0 = torch.zeros(cfg.n_latents)
+    Q_0_diag = 1.0 * torch.ones(cfg.n_latents)
+    initial_condition_pdf = DenseGaussianInitialCondition(cfg.n_latents, m_0, Q_0_diag)
 
     """local/backward encoder"""
-    backward_encoder = BackwardEncoderLRMvn(cfg.n_latents, cfg.n_hidden_backward, cfg.n_latents,
-                                            rank_local=cfg.rank_local, rank_backward=cfg.rank_backward,
-                                            device=cfg.device)
-    local_encoder = LocalEncoderLRMvn(cfg.n_latents, n_neurons_obs, cfg.n_hidden_local, cfg.n_latents,
-                                      rank=cfg.rank_local,
-                                      device=cfg.device, dropout=cfg.p_local_dropout)
-    nl_filter = NonlinearFilter(dynamics_mod, initial_condition_pdf, device=cfg.device)
+    backward_encoder = BackwardEncoderLRMvn(
+        cfg.n_latents,
+        cfg.n_hidden_backward,
+        cfg.n_latents,
+        rank_local=cfg.rank_local,
+        rank_backward=cfg.rank_backward,
+    )
+    local_encoder = LocalEncoderLRMvn(
+        cfg.n_latents,
+        n_neurons_obs,
+        cfg.n_hidden_local,
+        cfg.n_latents,
+        rank=cfg.rank_local,
+        dropout=cfg.p_local_dropout,
+    )
+    nl_filter = NonlinearFilter(dynamics_mod, initial_condition_pdf)
 
     """sequence vae"""
-    ssm = LowRankNonlinearStateSpaceModel(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder,
-                                          local_encoder, nl_filter, device=cfg.device)
+    ssm = LowRankNonlinearStateSpaceModel(
+        dynamics_mod,
+        likelihood_pdf,
+        initial_condition_pdf,
+        backward_encoder,
+        local_encoder,
+        nl_filter,
+    )
 
     """lightning"""
-    best_model_path = 'ckpts/smoother/causal_mask_0.0/epoch=827_valid_loss=1415.56_r2_valid_enc=0.89_r2_valid_bhv=0.00_valid_bps_enc=0.42.ckpt'
-    seq_vae = LightningMonkeyReaching.load_from_checkpoint(best_model_path, ssm=ssm, cfg=cfg,
-                                                           n_time_bins_enc=n_time_bins_enc, n_time_bins_bhv=n_bins_bhv,
-                                                           strict=False)
+    best_model_path = "ckpts/smoother/causal_mask_0.0/epoch=827_valid_loss=1415.56_r2_valid_enc=0.89_r2_valid_bhv=0.00_valid_bps_enc=0.42.ckpt"
+    seq_vae = LightningMonkeyReaching.load_from_checkpoint(
+        best_model_path,
+        ssm=ssm,
+        cfg=cfg,
+        n_time_bins_enc=n_time_bins_enc,
+        n_time_bins_bhv=n_bins_bhv,
+        strict=False,
+    )
     seq_vae.ssm = seq_vae.ssm.to(cfg.device)
     seq_vae.ssm.eval()
 
@@ -102,7 +135,7 @@ def main():
 
     m_0 = seq_vae.ssm.initial_c_pdf.m_0
     Q_0 = Fn.softplus(seq_vae.ssm.initial_c_pdf.log_Q_0)
-    z_ic = m_0 + Q_0.sqrt() * torch.randn(batch_sz_test + [cfg.n_latents], device=cfg.device)
+    z_ic = m_0 + Q_0.sqrt() * torch.randn(batch_sz_test + [cfg.n_latents])
     z_ic_p = seq_vae.ssm.predict_forward(z_ic, 35 - n_bins_bhv)
 
     for batch in train_dataloader:
@@ -112,22 +145,29 @@ def main():
     for batch in test_dataloader:
         z_f, stats = seq_vae.ssm.fast_filter_1_to_T(batch[0], cfg.n_samples)
         loss, z, stats = seq_vae.ssm(batch[0], cfg.n_samples)
-        z_p = seq_vae.ssm.predict_forward(z_f[:, :, n_bins_bhv], 35-n_bins_bhv)
+        z_p = seq_vae.ssm.predict_forward(z_f[:, :, n_bins_bhv], 35 - n_bins_bhv)
         z_p = torch.cat([z_f[:, :, :n_bins_bhv], z_p], dim=2)
         z_f_test.append(z_f)
         z_p_test.append(z_p)
         z_s_test.append(z)
-
 
     z_s_train = torch.cat(z_s_train, dim=1)
     z_s_test = torch.cat(z_s_test, dim=1)
     z_f_test = torch.cat(z_f_test, dim=1)
     z_p_test = torch.cat(z_p_test, dim=1)
 
-    rates_train_s = cfg.bin_sz * torch.exp(seq_vae.ssm.likelihood_pdf.readout_fn(z_s_train)).mean(dim=0)
-    rates_test_s = cfg.bin_sz * torch.exp(seq_vae.ssm.likelihood_pdf.readout_fn(z_s_test)).mean(dim=0)
-    rates_test_f = cfg.bin_sz * torch.exp(seq_vae.ssm.likelihood_pdf.readout_fn(z_f_test)).mean(dim=0)
-    rates_test_p = cfg.bin_sz * torch.exp(seq_vae.ssm.likelihood_pdf.readout_fn(z_p_test)).mean(dim=0)
+    rates_train_s = cfg.bin_sz * torch.exp(
+        seq_vae.ssm.likelihood_pdf.readout_fn(z_s_train)
+    ).mean(dim=0)
+    rates_test_s = cfg.bin_sz * torch.exp(
+        seq_vae.ssm.likelihood_pdf.readout_fn(z_s_test)
+    ).mean(dim=0)
+    rates_test_f = cfg.bin_sz * torch.exp(
+        seq_vae.ssm.likelihood_pdf.readout_fn(z_f_test)
+    ).mean(dim=0)
+    rates_test_p = cfg.bin_sz * torch.exp(
+        seq_vae.ssm.likelihood_pdf.readout_fn(z_p_test)
+    ).mean(dim=0)
 
     """plotting"""
     blues = cm.get_cmap("Blues", n_samples_mu_plt)
@@ -139,15 +179,29 @@ def main():
         clf = Ridge(alpha=0.01)
         # fit to training data
         clf.fit(rates_train_s.reshape(-1, n_neurons_obs), vel_train.reshape(-1, 2))
-        r2 = clf.score(rates_train_s.reshape(-1, n_neurons_obs), vel_train.reshape(-1, 2))
+        r2 = clf.score(
+            rates_train_s.reshape(-1, n_neurons_obs), vel_train.reshape(-1, 2)
+        )
 
         # transform test data
-        r2_test_s = clf.score(rates_test_s.reshape(-1, n_neurons_obs), vel_test.reshape(-1, 2))
-        r2_test_f = clf.score(rates_test_f.reshape(-1, n_neurons_obs), vel_test.reshape(-1, 2))
-        r2_test_p = clf.score(rates_test_p.reshape(-1, n_neurons_obs), vel_test.reshape(-1, 2))
-        vel_hat_test_s = clf.predict(rates_test_s.reshape(-1, n_neurons_obs)).reshape(list(batch_sz_test) + [2])
-        vel_hat_test_f = clf.predict(rates_test_f.reshape(-1, n_neurons_obs)).reshape(list(batch_sz_test) + [2])
-        vel_hat_test_p = clf.predict(rates_test_p.reshape(-1, n_neurons_obs)).reshape(list(batch_sz_test) + [2])
+        r2_test_s = clf.score(
+            rates_test_s.reshape(-1, n_neurons_obs), vel_test.reshape(-1, 2)
+        )
+        r2_test_f = clf.score(
+            rates_test_f.reshape(-1, n_neurons_obs), vel_test.reshape(-1, 2)
+        )
+        r2_test_p = clf.score(
+            rates_test_p.reshape(-1, n_neurons_obs), vel_test.reshape(-1, 2)
+        )
+        vel_hat_test_s = clf.predict(rates_test_s.reshape(-1, n_neurons_obs)).reshape(
+            list(batch_sz_test) + [2]
+        )
+        vel_hat_test_f = clf.predict(rates_test_f.reshape(-1, n_neurons_obs)).reshape(
+            list(batch_sz_test) + [2]
+        )
+        vel_hat_test_p = clf.predict(rates_test_p.reshape(-1, n_neurons_obs)).reshape(
+            list(batch_sz_test) + [2]
+        )
 
         vel_to_pos = lambda v: torch.cumsum(torch.tensor(v), dim=1)
 
@@ -163,18 +217,28 @@ def main():
     with torch.no_grad():
         fig, axs = plt.subplots(1, 4, figsize=(12, 3))
 
-        plot_utils.plot_reaching(axs[0], pos_test[trial_plt_dx], reach_colors[trial_plt_dx])
-        plot_utils.plot_reaching(axs[1], pos_test_hat_s[trial_plt_dx], reach_colors[trial_plt_dx])
-        plot_utils.plot_reaching(axs[2], pos_test_hat_f[trial_plt_dx], reach_colors[trial_plt_dx])
-        plot_utils.plot_reaching(axs[3], pos_test_hat_p[trial_plt_dx], reach_colors[trial_plt_dx])
+        plot_utils.plot_reaching(
+            axs[0], pos_test[trial_plt_dx], reach_colors[trial_plt_dx]
+        )
+        plot_utils.plot_reaching(
+            axs[1], pos_test_hat_s[trial_plt_dx], reach_colors[trial_plt_dx]
+        )
+        plot_utils.plot_reaching(
+            axs[2], pos_test_hat_f[trial_plt_dx], reach_colors[trial_plt_dx]
+        )
+        plot_utils.plot_reaching(
+            axs[3], pos_test_hat_p[trial_plt_dx], reach_colors[trial_plt_dx]
+        )
 
-        axs[0].set_title('true')
-        axs[1].set_title(f'smoothed, r2:{r2_test_s:.3f}')
-        axs[2].set_title(f'filtered, r2:{r2_test_f:.3f}')
-        axs[3].set_title(f'predicted, r2:{r2_test_p:.3f}')
-        fig.savefig('plots/filtered_vs_smoothed_vs_predicted_position.pdf', bbox_inches='tight')
+        axs[0].set_title("true")
+        axs[1].set_title(f"smoothed, r2:{r2_test_s:.3f}")
+        axs[2].set_title(f"filtered, r2:{r2_test_f:.3f}")
+        axs[3].set_title(f"predicted, r2:{r2_test_p:.3f}")
+        fig.savefig(
+            "plots/filtered_vs_smoothed_vs_predicted_position.pdf", bbox_inches="tight"
+        )
         plt.show()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -1,17 +1,21 @@
-import math
 import torch
-import torch.nn as nn
+from torch import nn
 import torch.nn.functional as Fn
-import xfads.linalg_utils as linalg_utils
-from xfads.linalg_utils import bmv, bop, bip, chol_bmv_solve
+from ..linalg_utils import bop, bip, chol_bmv_solve
 
 
 class DiagonalNonlinearStateSpaceModel(nn.Module):
-    def __init__(self, dynamics_mod, likelihood_pdf,
-                 initial_c_pdf, backward_encoder, local_encoder, nl_filter, device='cpu'):
-        super(DiagonalNonlinearStateSpaceModel, self).__init__()
+    def __init__(
+        self,
+        dynamics_mod,
+        likelihood_pdf,
+        initial_c_pdf,
+        backward_encoder,
+        local_encoder,
+        nl_filter,
+    ):
+        super().__init__()
 
-        self.device = device
         self.nl_filter = nl_filter
         self.dynamics_mod = dynamics_mod
         self.local_encoder = local_encoder
@@ -20,38 +24,50 @@ class DiagonalNonlinearStateSpaceModel(nn.Module):
         self.backward_encoder = backward_encoder
 
     @torch.jit.export
-    def forward(self,
-                y,
-                n_samples: int,
-                p_mask_y_in: float=0.0,
-                p_mask_apb: float = 0.0,
-                p_mask_a: float = 0.0,
-                p_mask_b: float = 0.0):
-
-        z_s, stats = self.fast_smooth_1_to_T(y, n_samples, p_mask_apb=p_mask_apb, p_mask_y_in=p_mask_y_in,
-                                             p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True)
+    def forward(
+        self,
+        y,
+        n_samples: int,
+        p_mask_y_in: float = 0.0,
+        p_mask_apb: float = 0.0,
+        p_mask_a: float = 0.0,
+        p_mask_b: float = 0.0,
+    ):
+        z_s, stats = self.fast_smooth_1_to_T(
+            y,
+            n_samples,
+            p_mask_apb=p_mask_apb,
+            p_mask_y_in=p_mask_y_in,
+            p_mask_a=p_mask_a,
+            p_mask_b=p_mask_b,
+            get_kl=True,
+        )
 
         ell = self.likelihood_pdf.get_ell(y, z_s).mean(dim=0)
-        kl = trajectory_kl_diagonal_dense(stats['m_f'], stats['P_f'], stats['m_p'], stats['P_p_chol'])
+        kl = trajectory_kl_diagonal_dense(
+            stats["m_f"], stats["P_f"], stats["m_p"], stats["P_p_chol"]
+        )
 
         loss = kl - ell
         loss = loss.sum(dim=-1).mean()
 
         return loss, z_s, stats
 
-    def fast_filter_1_to_T(self,
-                           y,
-                           n_samples: int,
-                           p_mask_y_in: float=0.0,
-                           p_mask_a: float=0.0,
-                           get_kl: bool=False,
-                           get_v: bool=False):
-
+    def fast_filter_1_to_T(
+        self,
+        y,
+        n_samples: int,
+        p_mask_y_in: float = 0.0,
+        p_mask_a: float = 0.0,
+        get_kl: bool = False,
+        get_v: bool = False,
+    ):
         n_trials, n_time_bins, n_neurons = y.shape
-        device = y.device
 
-        t_mask_y_in = torch.bernoulli((1 - p_mask_y_in) * torch.ones((n_trials, 1, n_neurons), device=device))
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=device))
+        t_mask_y_in = torch.bernoulli(
+            (1 - p_mask_y_in) * torch.ones((n_trials, 1, n_neurons))
+        )
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
 
@@ -60,27 +76,31 @@ class DiagonalNonlinearStateSpaceModel(nn.Module):
         K_y = t_mask_a[..., None, None] * K_y
 
         z_s, stats = self.nl_filter(k_y, K_y, n_samples, get_kl=get_kl, get_v=get_v)
-        stats['t_mask_y_in'] = t_mask_y_in
+        stats["t_mask_y_in"] = t_mask_y_in
 
         return z_s, stats
 
-    def fast_smooth_1_to_T(self,
-                           y,
-                           n_samples: int,
-                           p_mask_a: float=0.0,
-                           p_mask_apb: float=0.0,
-                           p_mask_y_in: float=0.0,
-                           p_mask_b: float=0.0,
-                           get_kl: bool=False,
-                           get_v: bool=False):
-
-        device = y.device
+    def fast_smooth_1_to_T(
+        self,
+        y,
+        n_samples: int,
+        p_mask_a: float = 0.0,
+        p_mask_apb: float = 0.0,
+        p_mask_y_in: float = 0.0,
+        p_mask_b: float = 0.0,
+        get_kl: bool = False,
+        get_v: bool = False,
+    ):
         n_trials, n_time_bins, n_neurons = y.shape
 
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=device))
-        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=device))
-        t_mask_apb = torch.bernoulli((1 - p_mask_apb) * torch.ones((n_trials, n_time_bins), device=device))
-        t_mask_y_in = torch.bernoulli((1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons), device=device))
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
+        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins)))
+        t_mask_apb = torch.bernoulli(
+            (1 - p_mask_apb) * torch.ones((n_trials, n_time_bins))
+        )
+        t_mask_y_in = torch.bernoulli(
+            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons))
+        )
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
 
@@ -98,22 +118,23 @@ class DiagonalNonlinearStateSpaceModel(nn.Module):
         K = t_mask_apb[..., None] * K
 
         z_s, stats = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v)
-        stats['t_mask_y_in'] = t_mask_y_in
+        stats["t_mask_y_in"] = t_mask_y_in
 
         return z_s, stats
 
-    def predict_forward(self,
-                        z_tm1: torch.Tensor,
-                        n_bins: int):
-
+    def predict_forward(self, z_tm1: torch.Tensor, n_bins: int):
         z_forward = []
         Q_sqrt = torch.sqrt(Fn.softplus(self.dynamics_mod.log_Q))
 
         for t in range(n_bins):
             if t == 0:
-                z_t = self.dynamics_mod.mean_fn(z_tm1) + Q_sqrt * torch.randn_like(z_tm1, device=z_tm1.device)
+                z_t = self.dynamics_mod.mean_fn(z_tm1) + Q_sqrt * torch.randn_like(
+                    z_tm1, device=z_tm1.device
+                )
             else:
-                z_t = self.dynamics_mod.mean_fn(z_forward[t-1]) + Q_sqrt * torch.randn_like(z_forward[t-1], device=z_tm1.device)
+                z_t = self.dynamics_mod.mean_fn(
+                    z_forward[t - 1]
+                ) + Q_sqrt * torch.randn_like(z_forward[t - 1], device=z_tm1.device)
 
             z_forward.append(z_t)
 
@@ -122,21 +143,21 @@ class DiagonalNonlinearStateSpaceModel(nn.Module):
 
 
 class NonlinearFilter(nn.Module):
-    def __init__(self, dynamics_mod, initial_c_pdf, device):
-        super(NonlinearFilter, self).__init__()
+    def __init__(self, dynamics_mod, initial_c_pdf):
+        super().__init__()
 
-        self.device = device
         self.dynamics_mod = dynamics_mod
         self.initial_c_pdf = initial_c_pdf
 
-    def forward(self,
-                k: torch.Tensor,
-                K: torch.Tensor,
-                n_samples: int,
-                get_v: bool=False,
-                get_kl: bool=False,
-                p_mask: float=0.0):
-
+    def forward(
+        self,
+        k: torch.Tensor,
+        K: torch.Tensor,
+        n_samples: int,
+        get_v: bool = False,
+        get_kl: bool = False,
+        p_mask: float = 0.0,
+    ):
         # mask data, 0: data available, 1: data missing
         n_trials, n_time_bins, n_latents = K.shape
 
@@ -148,17 +169,21 @@ class NonlinearFilter(nn.Module):
         z_f = []
         stats = {}
 
-        Q_diag = Fn.softplus(self.dynamics_mod.log_Q.to(k.device))
+        Q_diag = Fn.softplus(self.dynamics_mod.log_Q)
 
         for t in range(n_time_bins):
             if t == 0:
-                m_0 = self.initial_c_pdf.m_0.to(k.device)
-                P_p_diag = Fn.softplus(self.initial_c_pdf.log_Q_0.to(k.device))
-                z_f_t, m_f_t, m_p_t, P_f_t, P_p_chol_t = filter_step_0(m_0, k[:, 0], K[:, 0], P_p_diag, n_samples)
+                m_0 = self.initial_c_pdf.m_0
+                P_p_diag = Fn.softplus(self.initial_c_pdf.log_Q_0)
+                z_f_t, m_f_t, m_p_t, P_f_t, P_p_chol_t = filter_step_0(
+                    m_0, k[:, 0], K[:, 0], P_p_diag, n_samples
+                )
 
             else:
-                m_fn_z_tm1 = self.dynamics_mod.mean_fn(z_f[t-1]).movedim(0, -1)
-                z_f_t, m_f_t, m_p_t, P_f_t, P_p_chol_t = filter_step_t(m_fn_z_tm1, k[:, t], K[:, t], Q_diag)
+                m_fn_z_tm1 = self.dynamics_mod.mean_fn(z_f[t - 1]).movedim(0, -1)
+                z_f_t, m_f_t, m_p_t, P_f_t, P_p_chol_t = filter_step_t(
+                    m_fn_z_tm1, k[:, t], K[:, t], Q_diag
+                )
 
             m_f.append(m_f_t)
             P_f.append(P_f_t)
@@ -167,10 +192,10 @@ class NonlinearFilter(nn.Module):
             P_p_chol.append(P_p_chol_t)
 
         z_f = torch.stack(z_f, dim=2)
-        stats['m_f'] = torch.stack(m_f, dim=1)
-        stats['m_p'] = torch.stack(m_p, dim=1)
-        stats['P_f'] = torch.stack(P_f, dim=1)
-        stats['P_p_chol'] = torch.stack(P_p_chol, dim=1)
+        stats["m_f"] = torch.stack(m_f, dim=1)
+        stats["m_p"] = torch.stack(m_p, dim=1)
+        stats["P_f"] = torch.stack(P_f, dim=1)
+        stats["P_p_chol"] = torch.stack(P_p_chol, dim=1)
 
         return z_f, stats
 
@@ -185,8 +210,12 @@ def trajectory_kl_diagonal_dense(m_f, P_f, m_p, P_p_chol):
 
     diff = m_p - m_f
     qp = bip(diff, chol_bmv_solve(P_p_chol, diff))
-    tr = torch.sum(torch.diagonal(torch.cholesky_inverse(P_p_chol), dim1=-2, dim2=-1) * P_f, dim=-1)
-    logdet_p = 2 * torch.sum(torch.log(torch.diagonal(P_p_chol, dim1=-2, dim2=-1) + 1e-8), dim=-1)
+    tr = torch.sum(
+        torch.diagonal(torch.cholesky_inverse(P_p_chol), dim1=-2, dim2=-1) * P_f, dim=-1
+    )
+    logdet_p = 2 * torch.sum(
+        torch.log(torch.diagonal(P_p_chol, dim1=-2, dim2=-1) + 1e-8), dim=-1
+    )
     logdet_f = torch.sum(torch.log(P_f), dim=-1)
 
     kl = 0.5 * (tr + qp + logdet_p - logdet_f - L)
@@ -203,12 +232,11 @@ def predict_step_t(m_theta_z_tm1, Q_diag):
 
 
 def filter_step_t(m_theta_z_tm1, k, K, Q_diag):
-    device = m_theta_z_tm1.device
     n_trials, n_latents = K.shape
     n_samples = m_theta_z_tm1.shape[-1]
     batch_sz = [n_trials]
 
-    w_f = torch.randn([n_samples] + batch_sz + [n_latents], device=device)
+    w_f = torch.randn([n_samples] + batch_sz + [n_latents])
     m_p, P_p = predict_step_t(m_theta_z_tm1.movedim(-1, 0), Q_diag)
     P_p_chol = torch.linalg.cholesky(P_p)
 
@@ -226,7 +254,13 @@ def filter_step_t(m_theta_z_tm1, k, K, Q_diag):
 
 
 # @torch.jit.script
-def filter_step_0(m_0: torch.Tensor, k: torch.Tensor, K: torch.Tensor, P_0_diag: torch.Tensor, n_samples: int):
+def filter_step_0(
+    m_0: torch.Tensor,
+    k: torch.Tensor,
+    K: torch.Tensor,
+    P_0_diag: torch.Tensor,
+    n_samples: int,
+):
     n_trials, n_latents = K.shape
     batch_sz = [n_trials]
 
@@ -238,10 +272,12 @@ def filter_step_0(m_0: torch.Tensor, k: torch.Tensor, K: torch.Tensor, P_0_diag:
     h_f = h_0 + k
     m_f = P_f * h_f
 
-    w_f = torch.randn([n_samples] + batch_sz + [n_latents]).to(m_0.device)
+    w_f = torch.randn([n_samples] + batch_sz + [n_latents])
     z_f = m_f + torch.sqrt(P_f) * w_f
 
-    m_p = m_0 * torch.ones_like(m_f).to(m_0.device)
-    P_p_chol = torch.diag(torch.sqrt(P_0_diag)) * torch.ones(list(m_f.shape) + [n_latents]).to(m_0.device)
+    m_p = m_0 * torch.ones_like(m_f)
+    P_p_chol = torch.diag(torch.sqrt(P_0_diag)) * torch.ones(
+        list(m_f.shape) + [n_latents]
+    )
 
     return z_f, m_f, m_p, P_f, P_p_chol

@@ -2,7 +2,7 @@ import math
 import torch
 
 from torch.nn.functional import poisson_nll_loss
-from xfads.linalg_utils import bip, bop, bmv, bqp, chol_bmv_solve
+from .linalg_utils import bip, bmv, chol_bmv_solve
 
 
 def estimate_poisson_rate_bias(y, time_delta):
@@ -22,7 +22,7 @@ def estimate_poisson_rate_bias(y, time_delta):
         full_batch_mean /= n_batch
         bias_hat = torch.log(full_batch_mean / time_delta + 1e-12)
     else:
-        raise TypeError('pass in tensor or dataloader')
+        raise TypeError("pass in tensor or dataloader")
 
     return bias_hat
 
@@ -46,7 +46,6 @@ def bits_per_spike(preds, targets):
 
 
 def rts_smoother(m_p, P_p, m_f, P_f, F):
-    device = m_p.device
     n_trials, n_time_bins, n_latents = m_p.shape
 
     m_s = [None] * n_time_bins
@@ -56,11 +55,11 @@ def rts_smoother(m_p, P_p, m_f, P_f, F):
     P_s[-1] = P_f[:, -1]
 
     for t in range(n_time_bins - 2, -1, -1):
-        P_p_chol = torch.linalg.cholesky(P_p[:, t+1])
+        P_p_chol = torch.linalg.cholesky(P_p[:, t + 1])
         G = P_f[:, t] @ torch.cholesky_solve(F, P_p_chol).mT
 
-        m_s[t] = m_f[:, t] + bmv(G, m_s[t+1] - m_p[:, t+1])
-        P_s[t] = P_f[:, t] + G @ (P_s[t+1] - P_p[:, t+1]) @ G.mT
+        m_s[t] = m_f[:, t] + bmv(G, m_s[t + 1] - m_p[:, t + 1])
+        P_s[t] = P_f[:, t] + G @ (P_s[t + 1] - P_p[:, t + 1]) @ G.mT
 
     m_s = torch.stack(m_s, dim=1)
     P_s = torch.stack(P_s, dim=1)
@@ -69,7 +68,6 @@ def rts_smoother(m_p, P_p, m_f, P_f, F):
 
 
 def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
-    device = k.device
     n_trials, n_time_bins, n_latents = k.shape
 
     Q_0 = torch.diag(Q_0_diag)
@@ -82,11 +80,11 @@ def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
 
     for t in range(n_time_bins):
         if t == 0:
-            m_p.append(m_0 * torch.ones([n_trials, n_latents], device=device))
-            P_p.append(Q_0 * torch.ones([n_trials, n_latents, n_latents], device=device))
+            m_p.append(m_0 * torch.ones([n_trials, n_latents]))
+            P_p.append(Q_0 * torch.ones([n_trials, n_latents, n_latents]))
         else:
-            m_p.append(bmv(F, m_f[t-1]))
-            P_p.append(F @ P_f[t-1] @ F.T + Q)
+            m_p.append(bmv(F, m_f[t - 1]))
+            P_p.append(F @ P_f[t - 1] @ F.T + Q)
 
         P_p_chol = torch.linalg.cholesky(P_p[t])
         h_p = torch.cholesky_solve(m_p[t].unsqueeze(-1), P_p_chol).squeeze(-1)
@@ -108,7 +106,11 @@ def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
 
 
 def kl_diagonal_gaussian_canon(m_f, P_f_diag, m_p, P_p_diag):
-    kl = 0.5 * torch.log(P_p_diag / P_f_diag) + 0.5 * (P_f_diag + (m_f - m_p) ** 2) / P_p_diag - 0.5
+    kl = (
+        0.5 * torch.log(P_p_diag / P_f_diag)
+        + 0.5 * (P_f_diag + (m_f - m_p) ** 2) / P_p_diag
+        - 0.5
+    )
     kl = kl.sum(dim=-1)
     return kl
 
@@ -119,7 +121,7 @@ def linear_gaussian_ell(y, C, b, R_diag, m, P):
 
     qp = bip(diff, R_inv_diag * diff)
     logdet = torch.sum(torch.log(R_diag))
-    tr = torch.einsum('...ii -> ...', (C.mT * R_inv_diag) @ C @ P)
+    tr = torch.einsum("...ii -> ...", (C.mT * R_inv_diag) @ C @ P)
     const = y.shape[-1] * math.log(2 * math.pi)
 
     ell = -0.5 * (qp + tr + logdet + const)
@@ -128,9 +130,15 @@ def linear_gaussian_ell(y, C, b, R_diag, m, P):
 
 
 def kl_dense_gaussian_full_rank(m_f, P_f_chol, m_p, P_p_chol):
-    tr = torch.einsum('...ii -> ...', torch.cholesky_solve(P_f_chol @ P_f_chol.mT, P_p_chol))
-    logdet1 = 2 * torch.sum(torch.log(torch.diagonal(P_f_chol, dim1=-2, dim2=-1)), dim=-1)
-    logdet2 = 2 * torch.sum(torch.log(torch.diagonal(P_p_chol, dim1=-2, dim2=-1)), dim=-1)
+    tr = torch.einsum(
+        "...ii -> ...", torch.cholesky_solve(P_f_chol @ P_f_chol.mT, P_p_chol)
+    )
+    logdet1 = 2 * torch.sum(
+        torch.log(torch.diagonal(P_f_chol, dim1=-2, dim2=-1)), dim=-1
+    )
+    logdet2 = 2 * torch.sum(
+        torch.log(torch.diagonal(P_p_chol, dim1=-2, dim2=-1)), dim=-1
+    )
     qp = bip(m_f - m_p, chol_bmv_solve(P_p_chol, m_f - m_p))
     kl = 0.5 * (tr + qp + logdet2 - logdet1 - m_f.shape[-1])
 

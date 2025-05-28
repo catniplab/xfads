@@ -29,6 +29,7 @@ data_device: 'cpu'
 lr: 1e-3
 n_epochs: 1500
 batch_sz: 128
+lr_gamma_decay: 0.95
 
 # --- misc --- #
 bin_sz: 20e-3

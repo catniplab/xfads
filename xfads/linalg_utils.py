@@ -1,7 +1,7 @@
 import torch
 
 
-def triangular_inverse(A: torch.Tensor, upper: bool=False):
+def triangular_inverse(A: torch.Tensor, upper: bool = False):
     eye = torch.eye(A.size(-1), dtype=A.dtype, device=A.device)
     return torch.linalg.solve_triangular(A, eye, upper=upper)
 
@@ -11,7 +11,7 @@ def bmv(A, x):
 
 
 def bop(x1, x2):
-    return torch.einsum('...i, ...j -> ...ij', x1, x2)
+    return torch.einsum("...i, ...j -> ...ij", x1, x2)
 
 
 def bip(x1, x2):
@@ -19,7 +19,7 @@ def bip(x1, x2):
 
 
 def bqp(A, x):
-    return torch.einsum('...i, ...ij, ...j -> ...', x, A, x)
+    return torch.einsum("...i, ...ij, ...j -> ...", x, A, x)
 
 
 def chol_bmv_solve(chol_f, v):

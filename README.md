@@ -82,28 +82,28 @@ If you feel comfortable dabbling with XFADS by directly applying it to neural da
 LSVS was designed with custom configurations in mind so that depending on the problem, `dynamics_mod`, `initial_c_pdf`, `likelihood_pdf`, `local_encoder`, and `backward_encoder` can be configured as desired.  We include some general classes in `ssm_modules/encoders`, `ssm_modules/likelihoods`, and `ssm_modules/dynamics` that should be sufficient for a wide range of problems.  Below is an example configuration.
 ```
     """likelihood pdf"""
-    C = torch.nn.Linear(cfg.n_latents, n_neurons_obs, device=cfg.device)
-    likelihood_pdf = PoissonLikelihood(C, n_neurons_obs, cfg.bin_sz, device=cfg.device)
+    C = torch.nn.Linear(cfg.n_latents, n_neurons_obs)
+    likelihood_pdf = PoissonLikelihood(C, n_neurons_obs, cfg.bin_sz)
 
     """dynamics module"""
-    Q = torch.ones(cfg.n_latents, device=cfg.device)
-    dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics, device=cfg.device)
-    dynamics_mod = DenseGaussianNonlinearDynamics(dynamics_fn, cfg.n_latents, Q, device=cfg.device)
+    Q = torch.ones(cfg.n_latents)
+    dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics)
+    dynamics_mod = DenseGaussianNonlinearDynamics(dynamics_fn, cfg.n_latents, Q)
 
     """initial condition"""
-    Q0 = torch.ones(cfg.n_latents, device=cfg.device)
-    m0 = torch.zeros(cfg.n_latents, device=cfg.device)
-    initial_condition_pdf = DenseGaussianInitialCondition(cfg.n_latents, m0, Q0, device=cfg.device)
+    Q0 = torch.ones(cfg.n_latents)
+    m0 = torch.zeros(cfg.n_latents)
+    initial_condition_pdf = DenseGaussianInitialCondition(cfg.n_latents, m0, Q0)
 
     """local/backward encoder"""
     backward_encoder = BackwardEncoderLRMvn(cfg.n_latents_read, cfg.n_hidden_backward, cfg.n_latents, cfg.rank_local,
-                                            cfg.rank_backward, device=cfg.device)
+                                            cfg.rank_backward)
     local_encoder = LocalEncoderLRMvn(cfg.n_latents, n_neurons_enc, cfg.n_hidden_local, cfg.n_latents,
-                                      cfg.rank_local, device=cfg.device, dropout=cfg.p_local_dropout)
-    nl_filter = NonlinearFilter(dynamics_mod, initial_condition_pdf, device=cfg.device)
+                                      cfg.rank_local, dropout=cfg.p_local_dropout)
+    nl_filter = NonlinearFilter(dynamics_mod, initial_condition_pdf)
 
     """sequence vae"""
-    ssm = LowRankNonlinearStateSpaceModel(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder, local_encoder, nl_filter, device=cfg.device)
+    ssm = LowRankNonlinearStateSpaceModel(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder, local_encoder, nl_filter)
 
 
     """lightning"""

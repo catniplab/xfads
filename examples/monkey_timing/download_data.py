@@ -6,7 +6,7 @@ from nlb_tools.nwb_interface import NWBDataset
 
 
 def get_int_to_verbose_map():
-    options = [('S', 'L'), ('E', 'H'), ('1', '2', '3', '4', '5')]
+    options = [("S", "L"), ("E", "H"), ("1", "2", "3", "4", "5")]
     combinations = list(product(*options))
     mapping = {i: combination for i, combination in enumerate(combinations)}
 
@@ -14,7 +14,7 @@ def get_int_to_verbose_map():
 
 
 def get_verbose_to_int_map():
-    options = [('S', 'L'), ('E', 'H'), ('1', '2', '3', '4', '5')]
+    options = [("S", "L"), ("E", "H"), ("1", "2", "3", "4", "5")]
     combinations = list(product(*options))
     reverse_mapping = {combination: i for i, combination in enumerate(combinations)}
 
@@ -22,9 +22,9 @@ def get_verbose_to_int_map():
 
 
 def main():
-    datapath = 'data/000130/sub-Haydn/'
+    datapath = "data/000130/sub-Haydn/"
     dataset = NWBDataset(datapath)
-    save_root_path = 'data/'
+    save_root_path = "data/"
 
     # Extract neural data and lagged hand velocity
     binsize = 10
@@ -40,9 +40,11 @@ def main():
 
     # Extract neural data
     trial_info = dataset.trial_info  # .dropna()
-    trial_info['color'] = None
-    trial_info['position_id'] = None
-    trial_data = dataset.make_trial_data(align_field='set_time', align_range=(start, end))
+    trial_info["color"] = None
+    trial_info["position_id"] = None
+    trial_data = dataset.make_trial_data(
+        align_field="set_time", align_range=(start, end)
+    )
     n_trials = trial_data.shape[0] // trial_length
 
     y = []
@@ -50,51 +52,51 @@ def main():
     ts = []
     task_id = []
 
-    print('done')
+    print("done")
     print(trial_data.columns)
     count = 0
-    for trial_id, trial in trial_data.groupby('trial_id'):
-        trial_id_trial_info = trial_info[trial_info['trial_id'] == trial_id]
-        is_outlier_t = trial_id_trial_info['is_outlier'].iloc[0]
-        tp_t = torch.tensor(trial_id_trial_info['tp'].iloc[0])
-        ts_t = torch.tensor(trial_id_trial_info['ts'].iloc[0])
-        is_short_t = trial_id_trial_info['is_short'].iloc[0]
-        is_eye_t = trial_id_trial_info['is_eye'].iloc[0]
+    for trial_id, trial in trial_data.groupby("trial_id"):
+        trial_id_trial_info = trial_info[trial_info["trial_id"] == trial_id]
+        is_outlier_t = trial_id_trial_info["is_outlier"].iloc[0]
+        tp_t = torch.tensor(trial_id_trial_info["tp"].iloc[0])
+        ts_t = torch.tensor(trial_id_trial_info["ts"].iloc[0])
+        is_short_t = trial_id_trial_info["is_short"].iloc[0]
+        is_eye_t = trial_id_trial_info["is_eye"].iloc[0]
 
         if is_outlier_t or tp_t < 0:
             continue
 
         if is_short_t:
-            task_str_1 = 'S'
+            task_str_1 = "S"
 
             if ts_t == 480:
-                task_str_3 = '1'
+                task_str_3 = "1"
             elif ts_t == 560:
-                task_str_3 = '2'
+                task_str_3 = "2"
             elif ts_t == 640:
-                task_str_3 = '3'
+                task_str_3 = "3"
             elif ts_t == 720:
-                task_str_3 = '4'
+                task_str_3 = "4"
             elif ts_t == 800:
-                task_str_3 = '5'
+                task_str_3 = "5"
         else:
-            task_str_1 = 'L'
+            task_str_1 = "L"
 
             if ts_t == 800:
-                task_str_3 = '1'
+                task_str_3 = "1"
             elif ts_t == 900:
-                task_str_3 = '2'
+                task_str_3 = "2"
             elif ts_t == 1000:
-                task_str_3 = '3'
+                task_str_3 = "3"
             elif ts_t == 1100:
-                task_str_3 = '4'
+                task_str_3 = "4"
             elif ts_t == 1200:
-                task_str_3 = '5'
+                task_str_3 = "5"
 
         if is_eye_t:
-            task_str_2 = 'E'
+            task_str_2 = "E"
         else:
-            task_str_2 = 'H'
+            task_str_2 = "H"
 
         y_heldin_t = torch.tensor(trial.spikes.values)
         y_heldout_t = torch.tensor(trial.heldout_spikes.values)
@@ -123,43 +125,43 @@ def main():
     ts = torch.stack(ts, dim=0)
     tp = torch.stack(tp, dim=0)
 
-    with open('data/int_condition_map.yaml', 'w') as outfile:
+    with open("data/int_condition_map.yaml", "w") as outfile:
         yaml.dump(int_to_verbose_map, outfile, default_flow_style=False)
 
     train_data, valid_data, test_data = {}, {}, {}
     untrained_trials = 300
     seq_len = trial_length
 
-    train_data['y_obs'] = y[:-untrained_trials]
-    train_data['task_id'] = task_id[:-untrained_trials]
-    train_data['ts'] = ts[:-untrained_trials]
-    train_data['tp'] = tp[:-untrained_trials]
-    train_data['n_neurons_enc'] = n_neurons
-    train_data['n_neurons_obs'] = n_neurons
-    train_data['n_time_bins_enc'] = seq_len
+    train_data["y_obs"] = y[:-untrained_trials]
+    train_data["task_id"] = task_id[:-untrained_trials]
+    train_data["ts"] = ts[:-untrained_trials]
+    train_data["tp"] = tp[:-untrained_trials]
+    train_data["n_neurons_enc"] = n_neurons
+    train_data["n_neurons_obs"] = n_neurons
+    train_data["n_time_bins_enc"] = seq_len
 
-    valid_data['y_obs'] = y[-untrained_trials:-untrained_trials // 2]
-    valid_data['task_id'] = task_id[-untrained_trials:-untrained_trials // 2]
-    valid_data['ts'] = ts[-untrained_trials:-untrained_trials // 2]
-    valid_data['tp'] = tp[-untrained_trials:-untrained_trials // 2]
-    valid_data['n_neurons_enc'] = n_neurons
-    valid_data['n_neurons_obs'] = n_neurons
-    valid_data['n_time_bins_enc'] = seq_len
+    valid_data["y_obs"] = y[-untrained_trials : -untrained_trials // 2]
+    valid_data["task_id"] = task_id[-untrained_trials : -untrained_trials // 2]
+    valid_data["ts"] = ts[-untrained_trials : -untrained_trials // 2]
+    valid_data["tp"] = tp[-untrained_trials : -untrained_trials // 2]
+    valid_data["n_neurons_enc"] = n_neurons
+    valid_data["n_neurons_obs"] = n_neurons
+    valid_data["n_time_bins_enc"] = seq_len
 
-    test_data['y_obs'] = y[-untrained_trials // 2:]
-    test_data['task_id'] = task_id[-untrained_trials // 2:]
-    test_data['ts'] = ts[-untrained_trials // 2:]
-    test_data['tp'] = tp[-untrained_trials // 2:]
-    test_data['n_neurons_enc'] = n_neurons
-    test_data['n_neurons_obs'] = n_neurons
-    test_data['n_time_bins_enc'] = seq_len
+    test_data["y_obs"] = y[-untrained_trials // 2 :]
+    test_data["task_id"] = task_id[-untrained_trials // 2 :]
+    test_data["ts"] = ts[-untrained_trials // 2 :]
+    test_data["tp"] = tp[-untrained_trials // 2 :]
+    test_data["n_neurons_enc"] = n_neurons
+    test_data["n_neurons_obs"] = n_neurons
+    test_data["n_time_bins_enc"] = seq_len
 
-    torch.save(train_data, save_root_path + f'data_train_{binsize}ms.pt')
-    torch.save(valid_data, save_root_path + f'data_valid_{binsize}ms.pt')
-    torch.save(test_data, save_root_path + f'data_test_{binsize}ms.pt')
+    torch.save(train_data, save_root_path + f"data_train_{binsize}ms.pt")
+    torch.save(valid_data, save_root_path + f"data_valid_{binsize}ms.pt")
+    torch.save(test_data, save_root_path + f"data_test_{binsize}ms.pt")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
 
 # Index(['trial_id', 'start_time', 'end_time', 'go_time', 'split', 'fix_on_time',

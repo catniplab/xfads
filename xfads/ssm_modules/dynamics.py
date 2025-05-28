@@ -1,15 +1,11 @@
 import torch
-import torch.nn as nn
-import xfads.utils as utils
-
-from xfads.decorators import *
+from torch import nn
+from .. import utils
 
 
-@apply_memory_cleanup
 class DenseGaussianDynamics(nn.Module):
-    def __init__(self, mean_fn, n_latents, Q_diag, device='cpu', fix_Q=False):
-        super(DenseGaussianDynamics, self).__init__()
-        self.device = device
+    def __init__(self, mean_fn, n_latents, Q_diag, fix_Q=False):
+        super().__init__()
 
         self.mean_fn = mean_fn
         self.n_latents = n_latents
@@ -21,16 +17,13 @@ class DenseGaussianDynamics(nn.Module):
             self.log_Q = torch.nn.Parameter(utils.softplus_inv(Q_diag))
 
 
-@apply_memory_cleanup
 class DenseGaussianInitialCondition(nn.Module):
-    def __init__(self, n_latents, m_0, Q_0_diag, device='cpu', fix_Q_0=False):
-        super(DenseGaussianInitialCondition, self).__init__()
-        self.device = device
+    def __init__(self, n_latents, m_0, Q_0_diag, fix_Q_0=False):
+        super().__init__()
         self.n_latents = n_latents
-        self.m_0 = torch.nn.Parameter(m_0).to(self.device)
+        self.m_0 = torch.nn.Parameter(m_0)
 
         if fix_Q_0:
             self.log_Q_0 = utils.softplus_inv(Q_0_diag)
         else:
-            self.log_Q_0 = torch.nn.Parameter(utils.softplus_inv(Q_0_diag)).to(device)
-
+            self.log_Q_0 = torch.nn.Parameter(utils.softplus_inv(Q_0_diag))

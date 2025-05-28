@@ -4,10 +4,8 @@ import torch.nn.functional as Fn
 
 
 class dVBF(nn.Module):
-    def __init__(self, dynamics_mod, likelihood_pdf, initial_c_pdf,
-                 encoder, device='cpu'):
-        super(dVBF, self).__init__()
-        self.device = device
+    def __init__(self, dynamics_mod, likelihood_pdf, initial_c_pdf, encoder):
+        super().__init__()
 
         self.dynamics_mod = dynamics_mod
         self.likelihood_pdf = likelihood_pdf
@@ -15,24 +13,27 @@ class dVBF(nn.Module):
         self.encoder = encoder
 
     def forward(self, y, n_samples, p_mask_a=0.0, **kwargs):
-
         n_trials, n_time_bins, n_neurons = y.shape
         Q_sqrt = torch.sqrt(Fn.softplus(self.dynamics_mod.log_Q))
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device))
+        t_mask_a = torch.bernoulli(
+            (1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device)
+        )
 
         z = []
         m, P_diag = self.encoder(y)
         m = m * t_mask_a[..., None]
         P_diag = P_diag * t_mask_a[..., None] + (1 - t_mask_a[..., None])
 
-        w = m + torch.sqrt(P_diag) * torch.randn((n_samples, n_trials, n_time_bins, Q_sqrt.shape[-1]), device=y.device)
+        w = m + torch.sqrt(P_diag) * torch.randn(
+            (n_samples, n_trials, n_time_bins, Q_sqrt.shape[-1]), device=y.device
+        )
 
         for t in range(n_time_bins):
             if t == 0:
                 Q_0 = Fn.softplus(self.initial_c_pdf.log_Q_0)
                 z_t = self.initial_c_pdf.m_0 + torch.sqrt(Q_0) * w[:, :, 0]
             else:
-                z_t = self.dynamics_mod.mean_fn(z[t-1]) + Q_sqrt * w[:, :, t]
+                z_t = self.dynamics_mod.mean_fn(z[t - 1]) + Q_sqrt * w[:, :, t]
 
             z.append(z_t)
 
@@ -42,21 +43,22 @@ class dVBF(nn.Module):
         loss = (kl - ell).sum(dim=-1).mean()
 
         stats = {}
-        stats['m'] = z.mean(dim=0)
+        stats["m"] = z.mean(dim=0)
         return loss, z, stats
 
-    def predict_forward(self,
-                        z_tm1: torch.Tensor,
-                        n_bins: int):
-
+    def predict_forward(self, z_tm1: torch.Tensor, n_bins: int):
         z_forward = []
         Q_sqrt = torch.sqrt(Fn.softplus(self.dynamics_mod.log_Q))
 
         for t in range(n_bins):
             if t == 0:
-                z_t = self.dynamics_mod.mean_fn(z_tm1) + Q_sqrt * torch.randn_like(z_tm1, device=z_tm1.device)
+                z_t = self.dynamics_mod.mean_fn(z_tm1) + Q_sqrt * torch.randn_like(
+                    z_tm1, device=z_tm1.device
+                )
             else:
-                z_t = self.dynamics_mod.mean_fn(z_forward[t-1]) + Q_sqrt * torch.randn_like(z_forward[t-1], device=z_tm1.device)
+                z_t = self.dynamics_mod.mean_fn(
+                    z_forward[t - 1]
+                ) + Q_sqrt * torch.randn_like(z_forward[t - 1], device=z_tm1.device)
 
             z_forward.append(z_t)
 
