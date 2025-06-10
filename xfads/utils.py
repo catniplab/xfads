@@ -43,12 +43,11 @@ class DynamicsGRU(torch.nn.Module):
         empty_vec = torch.empty((h_in.shape[0], 0), device=z.device)
         h_out = self.gru_cell(empty_vec, h_in)
         h_out = h_out.reshape(h_in_shape + [self.hidden_dim])
-        residual = self.h_to_z(h_out)
+        out = self.h_to_z(h_out)
 
         if self.use_layer_norm:
-            out = self.layer_norm(z + residual)
-        else:
-            out = z + residual
+            out = self.layer_norm(out)
+
         return out
 
 
