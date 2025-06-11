@@ -51,6 +51,14 @@ class DynamicsGRU(torch.nn.Module):
         return out
 
 
+class DynamicsEye(torch.nn.Module):
+    def __init__(self):
+        super(DynamicsEye, self).__init__()
+
+    def forward(self, z):
+        return z
+
+
 class DynamicsQuadSaddle(torch.nn.Module):
     def __init__(self):
         super().__init__()
