@@ -93,5 +93,4 @@ dependencies:
       - threadpoolctl==3.5.0
       - torchmetrics==1.4.0.post0
       - tqdm==4.66.4
-      - xfads==0.5.0
       - yarl==1.9.4
