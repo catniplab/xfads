@@ -913,7 +913,10 @@ def fast_update_filtering_to_smoothing_stats_0(
     m_s = fast_bmv_P_s_0(Psi_f, Psi_s, K_b, K_y, Q_0_diag, h_s)
 
     v_1 = bmv(K_b.mT, z_f_c) + w_s
-    z_s = m_s + z_f_c - bmv(K_b, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    # z_s = m_s + z_f_c - bmv(K_b, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    unscaled_update = bmv(K_b, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    scaled_update = fast_bmv_P_f_0(K_y, Psi_f, Q_0_diag, unscaled_update)
+    z_s = m_s + z_f_c - scaled_update
 
     return m_s, z_s, Psi_s
 
@@ -936,7 +939,10 @@ def fast_update_filtering_to_smoothing_stats_t(
     m_s = fast_bmv_P_s(Psi_f, Psi_s, K_b, K_y, M_c_f_p, Q_diag, h_s)
 
     v_1 = bmv(K_b.mT, z_f_c) + w_s
-    z_s = m_s + z_f_c - bmv(K_b, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    # z_s = m_s + z_f_c - bmv(K_b, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    unscaled_update = bmv(K_b, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    scaled_update = fast_bmv_P_f(K_y, Psi_f, M_c_f_p, Q_diag, unscaled_update)
+    z_s = m_s + z_f_c - scaled_update
 
     return m_s, z_s, Psi_s
 
@@ -959,7 +965,10 @@ def fast_update_step(z_p_c, h_p, k, K, w_f, M_c_p, Q_diag):
     m = fast_bmv_P_f(K, Psi, M_c_p, Q_diag, h)
 
     v_1 = bmv(K.mT, z_p_c) + w_f
-    z = m + z_p_c - bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    # z = m + z_p_c - bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    unscaled_update = bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    scaled_update = fast_bmv_P_p(M_c_p, Q_diag, unscaled_update)
+    z = m + z_p_c - scaled_update
     return m, z, Psi, h
 
 
@@ -1018,7 +1027,10 @@ def fast_update_step_0(z_p_c, h_p, k, K, w_f, P_p_diag):
     m = m_1 - m_2
 
     v_1 = bmv(K.mT, z_p_c) + w_f
-    z = m + z_p_c - bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    # z = m + z_p_c - bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    unscaled_update = bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    scaled_update = P_p_diag * unscaled_update
+    z = m + z_p_c - scaled_update
 
     return m, z, Psi, h
 
