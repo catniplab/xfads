@@ -27,6 +27,7 @@ device: 'cpu'
 data_device: 'cpu'
 
 lr: 1e-3
+lr_gamma_decay: 0.997
 n_epochs: 1500
 batch_sz: 128
 lr_gamma_decay: 0.95
