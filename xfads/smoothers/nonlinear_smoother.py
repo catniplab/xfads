@@ -440,15 +440,15 @@ class NonlinearFilterSmallL(nn.Module):
         self.dynamics_mod = dynamics_mod
         self.initial_c_pdf = initial_c_pdf
 
-    def forward(
-        self,
-        k: torch.Tensor,
-        K: torch.Tensor,
-        n_samples: int,
-        get_v: bool = False,
-        get_kl: bool = False,
-        p_mask: float = 0.0,
-    ):
+    def forward(self,
+                k: torch.Tensor,
+                K: torch.Tensor,
+                n_samples: int,
+                get_v: bool=False,
+                get_kl: bool=False,
+                p_mask: float=0.0,
+                get_P_s: bool=False):
+
         # mask data, 0: data available, 1: data missing
         n_trials, n_time_bins, n_latents, rank = K.shape
         Q_diag = Fn.softplus(self.dynamics_mod.log_Q)
