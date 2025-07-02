@@ -374,7 +374,8 @@ class NonlinearFilterSmallL(nn.Module):
                 n_samples: int,
                 get_v: bool=False,
                 get_kl: bool=False,
-                p_mask: float=0.0):
+                p_mask: float=0.0,
+                get_P_s: bool=False):
 
         # mask data, 0: data available, 1: data missing
         n_trials, n_time_bins, n_latents, rank = K.shape
