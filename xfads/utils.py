@@ -171,6 +171,24 @@ class VdpDynamicsModel(nn.Module):
         return z_tp1
 
 
+class RingAttractorDynamics(nn.Module):
+    def __init__(self, bin_sz=5e-3, d=1.0, w=0.0, device='cpu'):
+        super().__init__()
+
+        self.d = d
+        self.w = w
+        self.bin_sz = bin_sz
+
+    def forward(self, z_t):
+        r_t = z_t.pow(2).sum(dim=-1).sqrt()[..., None]
+        theta_t = torch.arctan2(z_t[..., 1], z_t[..., 0])[..., None]
+
+        r_tp1 = r_t + self.bin_sz * (self.d - r_t)
+        theta_tp1 = theta_t + self.w * self.bin_sz
+        z_tp1 = torch.concat([r_tp1 * torch.cos(theta_tp1), r_tp1 * torch.sin(theta_tp1)], dim=-1)
+        return z_tp1
+
+
 def build_gru_dynamics_function(dim_input, dim_hidden, d_type=torch.float32, device='cpu', use_layer_norm=False):
     gru_dynamics = DynamicsGRU(dim_hidden, dim_input, device, use_layer_norm=use_layer_norm)
     return gru_dynamics
