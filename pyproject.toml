@@ -17,7 +17,7 @@ dependencies = [
     "sympy>=1.12",
     "torchvision>=0.2.2",
     "joblib>=1.4.2",
-    "skorch==1.0.0"
+    "skorch>=1.0.0"
 ]
 readme = "README.md"
 requires-python = ">= 3.8"
