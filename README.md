@@ -37,30 +37,18 @@ Setting `p_mask_a` is equivalent to masking *actual* observations, $y_t$; this s
 ## Installation
 1. Install miniconda or anaconda
 This is just to leverage `conda` for managing the Python environment. You can still use the IDE or code editor of your choice.
-2. Clone this repo
+2. Clone the repo
    ```
    git clone https://github.com/catniplab/xfads
    ```
-3. Create a Conda environment, and install its required packages, from `environment.yaml`
-   Make sure you are in the project directory i.e., the same directory as `environment.yaml`, and run:
+3. Create a Conda environment, and install the dependencies
+   Make sure you are in the project directory i.e., the same directory as `pyproject.toml`, and run:
    ```
-   conda env create -f environment.yaml
-   ```
-5. Add the `xfads` package to the `PYTHONPATH` of the environment
-   ```
+   conda create -n xfads python=3.11
+   conda activate xfads
    pip install -e .
    ```
-Note:
-In the case of using Google Colab, to be able to use ```conda``` commands, you have to install ```condacolab```\
-In a cell, run:
-```
-!pip install -q condacolab
-```
-But since Colab uses sessions anyway, it won't be that useful to use an environment. You can just start a new Colab session, and run, in a cell:
-```
-!pip install torch pytorch-lightning scikit-learn hydra-core matplotlib einops
-!pip install pyproject.toml -e .
-```
+
 
 ## Getting started with the examples:
 The set of examples in this codebase covers the primary functioning of the graphical state-space model of XFADS. The code is structured in a modular way that allows the users to change and plug in their own definitions of the classes that structure the elements of the model, i.e. the dynamics function, the likelihood density, the amortization network, etc.
