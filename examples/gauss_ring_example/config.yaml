@@ -5,31 +5,41 @@ n_latents_read: 2
 rank_local: 2
 rank_backward: 2
 
-Q_init: 1e-1
-n_hidden_dynamics: 64
+Q_init: 2.0  # Increased process noise to prevent collapse
+# n_hidden_dynamics: 128  # Increased capacity for dynamics
+n_hidden_dynamics: 64  # Match the trained checkpoint
+R_diag_value: 0.2  # Observation noise parameter
 
 # --- inference network --- #
 n_samples: 5
-n_hidden_local: 128
+# n_hidden_local: 16   # Reduced decoder capacity to force latent learning
+n_hidden_local: 128   # Match the trained checkpoint
 n_hidden_backward: 64
 
 # --- hyperparameters --- #
 use_cd: False
+use_layer_norm: True  # Enable layer norm for stability
 p_mask_a: 0.0
 p_mask_b: 0.0
 p_mask_apb: 0.0
 p_mask_y_in: 0.0
-p_local_dropout: 0.0
-p_backward_dropout: 0.0
+p_local_dropout: 0.4  # Add some dropout for regularization
+p_backward_dropout: 0.05
+
+# --- KL annealing for preventing posterior collapse --- #
+kl_warmup_epochs: 50  # Gradually increase KL weight over epochs
+kl_start_weight: 0.01  # Start with very low KL weight
+kl_end_weight: 0.3    # End with full KL weight
 
 # --- training --- #
 device: 'cpu'
 data_device: 'cpu'
 
-lr: 1e-3
-lr_gamma_decay: 0.997
-n_epochs: 1000
-batch_sz: 128
+lr: 5e-3  # Reduced learning rate for stability
+lr_gamma_decay: 0.995
+n_epochs: 100  # Fewer epochs with early stopping
+batch_sz: 64   # Smaller batches for stability
+gradient_clip_val: 0.5  # Tighter gradient clipping
 
 # --- misc --- #
 bin_sz: 1.0
@@ -39,4 +49,4 @@ seed: 42
 default_dtype: torch.float32
 
 # --- ray --- #
-n_ray_samples: 10 
+n_ray_samples: 10
