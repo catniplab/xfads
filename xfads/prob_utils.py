@@ -132,6 +132,75 @@ def align_latent_variables(z_1, z_2):
     return lstsq_sol.solution, z_2_rot
 
 
+def construct_hankel(y_batch, m, k):
+    """
+    Constructs the sample covariance-based Hankel matrix H0 ∈ ℝ^{mp × kp}
+    from a multivariate time series y ∈ ℝ^{T × p}, using PyTorch tensors.
+
+    Parameters
+    ----------
+    y : torch.Tensor of shape (T, p)
+        Observed time series.
+    m : int
+        Number of block rows (time lags).
+    k : int
+        Number of block columns (time lags).
+
+    Returns
+    -------
+    H0 : torch.Tensor of shape (m*p, k*p)
+        Sample block Hankel matrix constructed from empirical autocovariances.
+    """
+    y = y_batch.reshape(-1, y_batch.shape[-1])
+    T, p = y.shape
+    device = y.device
+    max_lag = m + k
+
+    # Estimate autocovariances Γₗ = E[y_{t+ℓ} y_tᵀ]
+    Gamma = []
+    for lag in range(max_lag):
+        valid = T - lag
+        y_t = y[lag:]         # shape: (T - lag, p)
+        y_0 = y[:valid]       # shape: (T - lag, p)
+        G = (y_t.T @ y_0) / valid  # shape: (p, p)
+        Gamma.append(G)
+
+    # Construct block Hankel matrix H0
+    H0 = torch.zeros((m * p, k * p), device=device, dtype=y.dtype)
+    for i in range(m):
+        for j in range(k):
+            G = Gamma[i + j + 1]  # Skip Γ₀, start from Γ₁
+            H0[i*p:(i+1)*p, j*p:(j+1)*p] = G
+
+    return H0
+
+
+def get_kalman_ho_estimates(H, n_neurons, n_latents):
+    U, S, VmT = torch.linalg.svd(H)
+
+    S = S[:n_latents]
+    U = U[:, :n_latents]
+    VmT = VmT[:n_latents]
+
+    obs_matrix = U * S.sqrt()
+    ctr_matrix = VmT.T * S.sqrt()
+
+    C_hat = obs_matrix[:n_neurons, :]
+    B_hat = ctr_matrix[:n_latents, :]
+
+    obs_matrix_top = obs_matrix[:-n_neurons, :]      # Remove last n_neuron rows
+    obs_matrix_bot = obs_matrix[n_neurons:, :]       # Remove first n_neuron rows
+    A_hat = torch.linalg.pinv(obs_matrix_bot) @ obs_matrix_top
+
+    return A_hat, B_hat, C_hat
+
+
+def determine_order(singular_values, threshold=1e-10):
+    normalized_sv = singular_values / singular_values[0]
+    n = (normalized_sv > threshold).sum()
+    return n
+
+
 def kl_diagonal_gaussian_canon(m_f, P_f_diag, m_p, P_p_diag):
     kl = (
         0.5 * torch.log(P_p_diag / P_f_diag)
