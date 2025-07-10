@@ -189,6 +189,17 @@ class RingAttractorDynamics(nn.Module):
         return z_tp1
 
 
+class SpiralDynamics(nn.Module):
+    def __init__(self, w=math.pi/16, rho=0.98, device='cpu'):
+        super().__init__()
+        angle = torch.tensor(w)
+        self.A = rho * torch.tensor([[torch.cos(angle), torch.sin(angle)],
+                          [-torch.sin(angle), torch.cos(angle)]], device=device)
+
+    def forward(self, z_t):
+        return bmv(self.A, z_t)
+
+
 def build_gru_dynamics_function(dim_input, dim_hidden, d_type=torch.float32, device='cpu', use_layer_norm=False):
     gru_dynamics = DynamicsGRU(dim_hidden, dim_input, device, use_layer_norm=use_layer_norm)
     return gru_dynamics

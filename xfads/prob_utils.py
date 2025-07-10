@@ -45,7 +45,7 @@ def bits_per_spike(preds, targets):
     return (nll_null - nll_model) / torch.nansum(targets) / math.log(2)
 
 
-def rts_smoother(m_p, P_p, m_f, P_f, F):
+def rts_smoother(m_p, P_p, m_f, P_f, F, n_samples=None):
     device = m_p.device
     n_trials, n_time_bins, n_latents = m_p.shape
 
@@ -55,6 +55,11 @@ def rts_smoother(m_p, P_p, m_f, P_f, F):
     m_s[-1] = m_f[:, -1]
     P_s[-1] = P_f[:, -1]
 
+    if n_samples:
+        z_s = [None] * n_time_bins
+        w_T = torch.randn((n_samples, n_trials, n_latents), device=m_p.device)
+        z_s[-1] = m_s[-1] + bmv(torch.linalg.cholesky(P_s[-1]), w_T)
+
     for t in range(n_time_bins - 2, -1, -1):
         P_p_chol = torch.linalg.cholesky(P_p[:, t+1])
         G = P_f[:, t] @ torch.cholesky_solve(F, P_p_chol).mT
@@ -62,8 +67,17 @@ def rts_smoother(m_p, P_p, m_f, P_f, F):
         m_s[t] = m_f[:, t] + bmv(G, m_s[t+1] - m_p[:, t+1])
         P_s[t] = P_f[:, t] + G @ (P_s[t+1] - P_p[:, t+1]) @ G.mT
 
+        if n_samples:
+            P_s_chol = torch.linalg.cholesky(P_s[t])
+            w_t = torch.randn((n_samples, n_trials, n_latents), device=m_p.device)
+            z_s[t] = m_f[:, t] + bmv(G, z_s[-1] - bmv(F, m_f[:, t])) + bmv(P_s_chol, w_t)
+
     m_s = torch.stack(m_s, dim=1)
     P_s = torch.stack(P_s, dim=1)
+
+    if n_samples:
+        z_s = torch.stack(z_s, dim=-2)
+        return m_s, P_s, z_s
 
     return m_s, P_s
 
@@ -105,6 +119,18 @@ def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
     P_p = torch.stack(P_p, dim=1)
 
     return m_f, P_f, m_p, P_p
+
+
+def align_latent_variables(z_1, z_2):
+    # align z_2 onto z_1
+
+    B, T, L = z_1.shape
+    z_1_reshaped = z_1.reshape(B * T, L)
+    z_2_reshaped = z_2.reshape(B * T, L)
+    lstsq_sol = torch.linalg.lstsq(z_2_reshaped, z_1_reshaped)
+    z_2_rot = bmv(lstsq_sol.solution, z_2)
+
+    return lstsq_sol.solution, z_2_rot
 
 
 def kl_diagonal_gaussian_canon(m_f, P_f_diag, m_p, P_p_diag):
