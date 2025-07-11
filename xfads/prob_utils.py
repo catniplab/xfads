@@ -51,6 +51,7 @@ def rts_smoother(m_p, P_p, m_f, P_f, F, n_samples=None):
 
     m_s = [None] * n_time_bins
     P_s = [None] * n_time_bins
+    P_tp1_t_s = [None] * (n_time_bins - 1)
 
     m_s[-1] = m_f[:, -1]
     P_s[-1] = P_f[:, -1]
@@ -64,8 +65,9 @@ def rts_smoother(m_p, P_p, m_f, P_f, F, n_samples=None):
         P_p_chol = torch.linalg.cholesky(P_p[:, t + 1])
         G = P_f[:, t] @ torch.cholesky_solve(F, P_p_chol).mT
 
-        m_s[t] = m_f[:, t] + bmv(G, m_s[t + 1] - m_p[:, t + 1])
-        P_s[t] = P_f[:, t] + G @ (P_s[t + 1] - P_p[:, t + 1]) @ G.mT
+        m_s[t] = m_f[:, t] + bmv(G, m_s[t+1] - m_p[:, t+1])
+        P_s[t] = P_f[:, t] + G @ (P_s[t+1] - P_p[:, t+1]) @ G.mT
+        P_tp1_t_s[t] = G @ P_s[t+1] + bop(m_s[t+1] - m_p[t+1], m_s[t])
 
         if n_samples:
             P_s_chol = torch.linalg.cholesky(P_s[t])
@@ -79,7 +81,7 @@ def rts_smoother(m_p, P_p, m_f, P_f, F, n_samples=None):
         z_s = torch.stack(z_s, dim=-2)
         return m_s, P_s, z_s
 
-    return m_s, P_s
+    return m_s, P_s, P_tp1_t_s
 
 
 def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
