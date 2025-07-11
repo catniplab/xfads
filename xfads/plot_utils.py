@@ -446,3 +446,17 @@ def plot_ball_covariance(y, P_diag, P=None, w=16, label_dx=None):
         #     axbig.axvline(x=label_dx, linestyle='--')
 
     return fig
+
+
+def remove_axs_fluff(ax, ticks=True, tick_labels=True, spines=True):
+    if ticks:
+        ax.set_xticks([])  # Remove x ticks
+        ax.set_yticks([])  # Remove y ticks
+    if tick_labels:
+        ax.set_xticklabels([])  # Remove x labels
+        ax.set_yticklabels([])  # Remove y labels
+    if spines:
+        ax.spines["top"].set_visible(False)  # Remove top border
+        ax.spines["bottom"].set_visible(False)  # Remove bottom border
+        ax.spines["left"].set_visible(False)  # Remove left border
+        ax.spines["right"].set_visible(False)  # Remove right border
