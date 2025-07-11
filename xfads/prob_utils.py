@@ -67,7 +67,7 @@ def rts_smoother(m_p, P_p, m_f, P_f, F, n_samples=None):
 
         m_s[t] = m_f[:, t] + bmv(G, m_s[t+1] - m_p[:, t+1])
         P_s[t] = P_f[:, t] + G @ (P_s[t+1] - P_p[:, t+1]) @ G.mT
-        P_tp1_t_s[t] = G @ P_s[t+1] + bop(m_s[t+1] - m_p[t+1], m_s[t])
+        P_tp1_t_s[t] = G @ P_s[t+1] + bop(m_s[t+1] - m_p[:, t+1], m_s[t])
 
         if n_samples:
             P_s_chol = torch.linalg.cholesky(P_s[t])
@@ -76,10 +76,11 @@ def rts_smoother(m_p, P_p, m_f, P_f, F, n_samples=None):
 
     m_s = torch.stack(m_s, dim=1)
     P_s = torch.stack(P_s, dim=1)
+    P_tp1_t_s = torch.stack(P_tp1_t_s, dim=1)
 
     if n_samples:
         z_s = torch.stack(z_s, dim=-2)
-        return m_s, P_s, z_s
+        return m_s, P_s, P_tp1_t_s, z_s
 
     return m_s, P_s, P_tp1_t_s
 
@@ -195,6 +196,77 @@ def get_kalman_ho_estimates(H, n_neurons, n_latents):
     A_hat = torch.linalg.pinv(obs_matrix_bot) @ obs_matrix_top
 
     return A_hat, B_hat, C_hat
+
+
+def em_update_batch(m, P, P_lag, y):
+    """
+    EM update for A, C, Q, R from batched smoothed statistics.
+
+    Parameters
+    ----------
+    m : (B, T, n)
+        Smoothed means of latent states
+    P : (B, T, n, n)
+        Smoothed covariances of latent states
+    P_lag : (B, T-1, n, n)
+        Smoothed lag-one covariances
+    y : (B, T, p)
+        Observed outputs
+
+    Returns
+    -------
+    A_hat : (n, n)
+    C_hat : (p, n)
+    Q_hat : (n, n)
+    R_hat : (p, p)
+    """
+    B, T, n = m.shape
+    p = y.shape[-1]
+
+    # Expected covariances
+    Ezzt = P + torch.einsum('btn,btm->btnm', m, m)
+    Ezztm1 = P_lag + torch.einsum('btn,btm->btnm', m[:, 1:], m[:, :-1])
+
+    # --- A update ---
+    K0 = Ezzt[:, :-1].sum(dim=(0, 1))         # (n, n)
+    K1 = Ezztm1.sum(dim=(0, 1))               # (n, n)
+    A_hat = K1 @ torch.linalg.inv(K0)
+
+    # --- C update ---
+    S_yz = torch.einsum('btp,btn->pn', y, m)  # (p, n)
+    K0_full = Ezzt.sum(dim=(0, 1))            # (n, n)
+    C_hat = S_yz @ torch.linalg.inv(K0_full)
+
+    # --- Q update ---
+    E_ztzt = Ezzt[:, 1:]              # (B, T-1, n, n)
+    E_ztztm1 = Ezztm1                 # (B, T-1, n, n)
+    E_ztm1ztm1 = Ezzt[:, :-1]         # (B, T-1, n, n)
+
+    term1 = E_ztzt.sum(dim=(0, 1))
+    term2 = A_hat @ E_ztztm1.sum(dim=(0, 1))
+    term3 = term2.T
+    term4 = A_hat @ E_ztm1ztm1.sum(dim=(0, 1)) @ A_hat.T
+
+    Q_hat = (term1 - term2 - term3 + term4) / ((T - 1) * B)
+
+    # --- R update ---
+    # E[yt yt^T]
+    E_yyT = torch.einsum('btp,btq->bpq', y, y).sum(dim=(0, 1))  # (p, p)
+    # E[yt zt^T]
+    E_yzT = torch.einsum('btp,btn->bpn', y, m).sum(dim=0)       # (T, p, n)
+    E_yzT = E_yzT.sum(dim=0)                                    # (p, n)
+    # E[zt zt^T]
+    E_zzT = Ezzt.sum(dim=(0, 1))                                # (n, n)
+
+    R_hat = (
+        E_yyT
+        - C_hat @ S_yz.T
+        - S_yz @ C_hat.T
+        + C_hat @ E_zzT @ C_hat.T
+    ) / (T * B)
+
+    return A_hat, C_hat, Q_hat, R_hat
+
 
 
 def determine_order(singular_values, threshold=1e-10):
