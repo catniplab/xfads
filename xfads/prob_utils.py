@@ -72,7 +72,7 @@ def rts_smoother(m_p, P_p, m_f, P_f, F, n_samples=None):
         if n_samples:
             P_s_chol = torch.linalg.cholesky(P_s[t])
             w_t = torch.randn((n_samples, n_trials, n_latents), device=m_p.device)
-            z_s[t] = m_f[:, t] + bmv(G, z_s[-1] - bmv(F, m_f[:, t])) + bmv(P_s_chol, w_t)
+            z_s[t] = m_f[:, t] + bmv(G, z_s[t+1] - bmv(F, m_f[:, t])) + bmv(P_s_chol, w_t)
 
     m_s = torch.stack(m_s, dim=1)
     P_s = torch.stack(P_s, dim=1)
