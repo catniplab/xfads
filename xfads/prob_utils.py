@@ -1,6 +1,7 @@
 import math
 import torch
 
+from scipy.linalg import solve_discrete_lyapunov
 from torch.nn.functional import poisson_nll_loss
 from xfads.linalg_utils import bip, bop, bmv, bqp, chol_bmv_solve
 
@@ -179,7 +180,19 @@ def construct_hankel(y_batch, m, k):
     return H0
 
 
-def get_kalman_ho_estimates(H, n_neurons, n_latents):
+def get_kalman_ho_estimates(H, Gamma_0, n_neurons, n_latents):
+    """
+    Kalman-Ho estimation of LDS parameters, including Q and R.
+
+    Inputs:
+        H: Hankel matrix (torch.Tensor)
+        Gamma_0: empirical autocovariance at lag 0 (torch.Tensor)
+        n_neurons: number of observed variables
+        n_latents: desired number of latent states
+
+    Returns:
+        A_hat, B_hat, C_hat, Q_hat, R_hat
+    """
     U, S, VmT = torch.linalg.svd(H)
 
     S = S[:n_latents]
@@ -190,13 +203,47 @@ def get_kalman_ho_estimates(H, n_neurons, n_latents):
     ctr_matrix = VmT.T * S.sqrt()
 
     C_hat = obs_matrix[:n_neurons, :]
-    B_hat = ctr_matrix[:n_latents, :]
+    B_hat = ctr_matrix[:n_latents, :]  # B_hat ≈ B, not P_inf
 
-    obs_matrix_top = obs_matrix[:-n_neurons, :]      # Remove last n_neuron rows
-    obs_matrix_bot = obs_matrix[n_neurons:, :]       # Remove first n_neuron rows
+    # Estimate A using shifted observability matrices
+    obs_matrix_top = obs_matrix[:-n_neurons, :]
+    obs_matrix_bot = obs_matrix[n_neurons:, :]
     A_hat = torch.linalg.pinv(obs_matrix_bot) @ obs_matrix_top
 
-    return A_hat, B_hat, C_hat
+    # Estimate Q from B: Q_hat = B B^T
+    Q_hat = B_hat @ B_hat.T
+    Q_hat = 0.5 * (Q_hat + Q_hat.T)  # Symmetrize
+
+    # Solve discrete-time Lyapunov equation: P = A P Aᵀ + Q
+    # Convert to numpy for scipy
+    A_np = A_hat.detach().cpu().numpy()
+    Q_np = Q_hat.detach().cpu().numpy()
+    P_inf_np = solve_discrete_lyapunov(A_np, Q_np)
+    P_inf = torch.from_numpy(P_inf_np).to(H.device, dtype=H.dtype)
+
+    # Estimate R using: Gamma_0 = C P_inf Cᵀ + R ⇒ R = Gamma_0 - C P_inf Cᵀ
+    R_hat = Gamma_0 - C_hat @ P_inf @ C_hat.T
+    R_hat = 0.5 * (R_hat + R_hat.T)  # Symmetrize
+
+    return A_hat, B_hat, C_hat, Q_hat, R_hat
+
+
+def compute_gamma_0(Y):
+    """
+    Computes empirical output autocovariance at lag 0:
+    Γ₀ = E[y_t y_tᵀ] from observations shaped (T × trials, n_neurons)
+
+    Args:
+        Y (torch.Tensor): Observations of shape (T * trials, n_neurons)
+
+    Returns:
+        Gamma_0 (torch.Tensor): (n_neurons, n_neurons)
+    """
+    # Center data
+    Y_centered = Y - Y.mean(dim=0, keepdim=True)  # mean over time
+    # Compute sample covariance
+    Gamma_0 = (Y_centered.T @ Y_centered) / Y.shape[0]  # (n_neurons, n_neurons)
+    return Gamma_0
 
 
 def em_update_batch(m, P, P_lag, y):
