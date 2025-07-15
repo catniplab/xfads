@@ -29,7 +29,8 @@ device: 'cuda'
 data_device: 'cuda'
 
 lr: 1e-3
-n_epochs: 2_000
+lr_gamma_decay: 0.997
+n_epochs: 2000
 batch_sz: 256
 check_val_every_n_epoch: 50
 

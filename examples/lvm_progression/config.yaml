@@ -4,8 +4,6 @@ n_latents_read: 2
 
 rank_local: 2
 rank_backward: 2
-
-Q_init: 1e-1
 n_hidden_dynamics: 64
 
 # --- inference network --- #
@@ -15,21 +13,21 @@ n_hidden_backward: 64
 
 # --- hyperparameters --- #
 use_cd: False
-p_mask_a: 0.0
+p_mask_a: 0.8
 p_mask_b: 0.0
 p_mask_apb: 0.0
 p_mask_y_in: 0.0
 p_local_dropout: 0.4
 p_backward_dropout: 0.0
+lr_gamma_decay: 0.99
 
 # --- training --- #
 device: 'cpu'
 data_device: 'cpu'
 
 lr: 1e-3
-lr_gamma_decay: 0.997
-n_epochs: 250
-batch_sz: 128
+n_epochs: 150
+batch_sz: 256
 
 # --- misc --- #
 bin_sz: 20e-3

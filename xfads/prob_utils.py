@@ -1,6 +1,7 @@
 import math
 import torch
 
+from scipy.linalg import solve_discrete_lyapunov
 from torch.nn.functional import poisson_nll_loss
 from xfads.linalg_utils import bip, bop, bmv, bqp, chol_bmv_solve
 
@@ -45,15 +46,21 @@ def bits_per_spike(preds, targets):
     return (nll_null - nll_model) / torch.nansum(targets) / math.log(2)
 
 
-def rts_smoother(m_p, P_p, m_f, P_f, F):
+def rts_smoother(m_p, P_p, m_f, P_f, F, n_samples=None):
     device = m_p.device
     n_trials, n_time_bins, n_latents = m_p.shape
 
     m_s = [None] * n_time_bins
     P_s = [None] * n_time_bins
+    P_tp1_t_s = [None] * (n_time_bins - 1)
 
     m_s[-1] = m_f[:, -1]
     P_s[-1] = P_f[:, -1]
+
+    if n_samples:
+        z_s = [None] * n_time_bins
+        w_T = torch.randn((n_samples, n_trials, n_latents), device=m_p.device)
+        z_s[-1] = m_s[-1] + bmv(torch.linalg.cholesky(P_s[-1]), w_T)
 
     for t in range(n_time_bins - 2, -1, -1):
         P_p_chol = torch.linalg.cholesky(P_p[:, t+1])
@@ -61,11 +68,22 @@ def rts_smoother(m_p, P_p, m_f, P_f, F):
 
         m_s[t] = m_f[:, t] + bmv(G, m_s[t+1] - m_p[:, t+1])
         P_s[t] = P_f[:, t] + G @ (P_s[t+1] - P_p[:, t+1]) @ G.mT
+        P_tp1_t_s[t] = G @ P_s[t+1] + bop(m_s[t+1] - m_p[:, t+1], m_s[t])
+
+        if n_samples:
+            P_s_chol = torch.linalg.cholesky(P_s[t])
+            w_t = torch.randn((n_samples, n_trials, n_latents), device=m_p.device)
+            z_s[t] = m_f[:, t] + bmv(G, z_s[t+1] - bmv(F, m_f[:, t])) + bmv(P_s_chol, w_t)
 
     m_s = torch.stack(m_s, dim=1)
     P_s = torch.stack(P_s, dim=1)
+    P_tp1_t_s = torch.stack(P_tp1_t_s, dim=1)
 
-    return m_s, P_s
+    if n_samples:
+        z_s = torch.stack(z_s, dim=-2)
+        return m_s, P_s, P_tp1_t_s, z_s
+
+    return m_s, P_s, P_tp1_t_s
 
 
 def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
@@ -105,6 +123,204 @@ def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
     P_p = torch.stack(P_p, dim=1)
 
     return m_f, P_f, m_p, P_p
+
+
+def align_latent_variables(z_1, z_2):
+    # align z_2 onto z_1
+
+    B, T, L = z_1.shape
+    z_1_reshaped = z_1.reshape(B * T, L)
+    z_2_reshaped = z_2.reshape(B * T, L)
+    lstsq_sol = torch.linalg.lstsq(z_2_reshaped, z_1_reshaped)
+    z_2_rot = bmv(lstsq_sol.solution, z_2)
+
+    return lstsq_sol.solution, z_2_rot
+
+
+def construct_hankel(y_batch, m, k):
+    """
+    Constructs the sample covariance-based Hankel matrix H0 ∈ ℝ^{mp × kp}
+    from a multivariate time series y ∈ ℝ^{T × p}, using PyTorch tensors.
+
+    Parameters
+    ----------
+    y : torch.Tensor of shape (T, p)
+        Observed time series.
+    m : int
+        Number of block rows (time lags).
+    k : int
+        Number of block columns (time lags).
+
+    Returns
+    -------
+    H0 : torch.Tensor of shape (m*p, k*p)
+        Sample block Hankel matrix constructed from empirical autocovariances.
+    """
+    y = y_batch.reshape(-1, y_batch.shape[-1])
+    T, p = y.shape
+    device = y.device
+    max_lag = m + k
+
+    # Estimate autocovariances Γₗ = E[y_{t+ℓ} y_tᵀ]
+    Gamma = []
+    for lag in range(max_lag):
+        valid = T - lag
+        y_t = y[lag:]         # shape: (T - lag, p)
+        y_0 = y[:valid]       # shape: (T - lag, p)
+        G = (y_t.T @ y_0) / valid  # shape: (p, p)
+        Gamma.append(G)
+
+    # Construct block Hankel matrix H0
+    H0 = torch.zeros((m * p, k * p), device=device, dtype=y.dtype)
+    for i in range(m):
+        for j in range(k):
+            G = Gamma[i + j + 1]  # Skip Γ₀, start from Γ₁
+            H0[i*p:(i+1)*p, j*p:(j+1)*p] = G
+
+    return H0
+
+
+def get_kalman_ho_estimates(H, Gamma_0, n_neurons, n_latents):
+    """
+    Kalman-Ho estimation of LDS parameters, including Q and R.
+
+    Inputs:
+        H: Hankel matrix (torch.Tensor)
+        Gamma_0: empirical autocovariance at lag 0 (torch.Tensor)
+        n_neurons: number of observed variables
+        n_latents: desired number of latent states
+
+    Returns:
+        A_hat, B_hat, C_hat, Q_hat, R_hat
+    """
+    U, S, VmT = torch.linalg.svd(H)
+
+    S = S[:n_latents]
+    U = U[:, :n_latents]
+    VmT = VmT[:n_latents]
+
+    obs_matrix = U * S.sqrt()
+    ctr_matrix = VmT.T * S.sqrt()
+
+    C_hat = obs_matrix[:n_neurons, :]
+    B_hat = ctr_matrix[:n_latents, :]  # B_hat ≈ B, not P_inf
+
+    # Estimate A using shifted observability matrices
+    obs_matrix_top = obs_matrix[:-n_neurons, :]
+    obs_matrix_bot = obs_matrix[n_neurons:, :]
+    A_hat = torch.linalg.pinv(obs_matrix_bot) @ obs_matrix_top
+
+    # Estimate Q from B: Q_hat = B B^T
+    Q_hat = B_hat @ B_hat.T
+    Q_hat = 0.5 * (Q_hat + Q_hat.T)  # Symmetrize
+
+    # Solve discrete-time Lyapunov equation: P = A P Aᵀ + Q
+    # Convert to numpy for scipy
+    A_np = A_hat.detach().cpu().numpy()
+    Q_np = Q_hat.detach().cpu().numpy()
+    P_inf_np = solve_discrete_lyapunov(A_np, Q_np)
+    P_inf = torch.from_numpy(P_inf_np).to(H.device, dtype=H.dtype)
+
+    # Estimate R using: Gamma_0 = C P_inf Cᵀ + R ⇒ R = Gamma_0 - C P_inf Cᵀ
+    R_hat = Gamma_0 - C_hat @ P_inf @ C_hat.T
+    R_hat = 0.5 * (R_hat + R_hat.T)  # Symmetrize
+
+    return A_hat, B_hat, C_hat, Q_hat, R_hat
+
+
+def compute_gamma_0(Y):
+    """
+    Computes empirical output autocovariance at lag 0:
+    Γ₀ = E[y_t y_tᵀ] from observations shaped (T × trials, n_neurons)
+
+    Args:
+        Y (torch.Tensor): Observations of shape (T * trials, n_neurons)
+
+    Returns:
+        Gamma_0 (torch.Tensor): (n_neurons, n_neurons)
+    """
+    # Center data
+    Y_centered = Y - Y.mean(dim=0, keepdim=True)  # mean over time
+    # Compute sample covariance
+    Gamma_0 = (Y_centered.T @ Y_centered) / Y.shape[0]  # (n_neurons, n_neurons)
+    return Gamma_0
+
+
+def em_update_batch(m, P, P_lag, y):
+    """
+    EM update for A, C, Q, R from batched smoothed statistics.
+
+    Parameters
+    ----------
+    m : (B, T, n)
+        Smoothed means of latent states
+    P : (B, T, n, n)
+        Smoothed covariances of latent states
+    P_lag : (B, T-1, n, n)
+        Smoothed lag-one covariances
+    y : (B, T, p)
+        Observed outputs
+
+    Returns
+    -------
+    A_hat : (n, n)
+    C_hat : (p, n)
+    Q_hat : (n, n)
+    R_hat : (p, p)
+    """
+    B, T, n = m.shape
+    p = y.shape[-1]
+
+    # Expected covariances
+    Ezzt = P + torch.einsum('btn,btm->btnm', m, m)
+    Ezztm1 = P_lag + torch.einsum('btn,btm->btnm', m[:, 1:], m[:, :-1])
+
+    # --- A update ---
+    K0 = Ezzt[:, :-1].sum(dim=(0, 1))         # (n, n)
+    K1 = Ezztm1.sum(dim=(0, 1))               # (n, n)
+    A_hat = K1 @ torch.linalg.inv(K0)
+
+    # --- C update ---
+    S_yz = torch.einsum('btp,btn->pn', y, m)  # (p, n)
+    K0_full = Ezzt.sum(dim=(0, 1))            # (n, n)
+    C_hat = S_yz @ torch.linalg.inv(K0_full)
+
+    # --- Q update ---
+    E_ztzt = Ezzt[:, 1:]              # (B, T-1, n, n)
+    E_ztztm1 = Ezztm1                 # (B, T-1, n, n)
+    E_ztm1ztm1 = Ezzt[:, :-1]         # (B, T-1, n, n)
+
+    term1 = E_ztzt.sum(dim=(0, 1))
+    term2 = A_hat @ E_ztztm1.sum(dim=(0, 1))
+    term3 = term2.T
+    term4 = A_hat @ E_ztm1ztm1.sum(dim=(0, 1)) @ A_hat.T
+
+    Q_hat = (term1 - term2 - term3 + term4) / ((T - 1) * B)
+
+    # --- R update ---
+    # E[yt yt^T]
+    E_yyT = torch.einsum('btp,btq->bpq', y, y).sum(dim=(0, 1))  # (p, p)
+    # E[yt zt^T]
+    E_yzT = torch.einsum('btp,btn->bpn', y, m).sum(dim=0)       # (T, p, n)
+    E_yzT = E_yzT.sum(dim=0)                                    # (p, n)
+    # E[zt zt^T]
+    E_zzT = Ezzt.sum(dim=(0, 1))                                # (n, n)
+
+    R_hat = (
+        E_yyT
+        - C_hat @ S_yz.T
+        - S_yz @ C_hat.T
+        + C_hat @ E_zzT @ C_hat.T
+    ) / (T * B)
+
+    return A_hat, C_hat, Q_hat, R_hat
+
+
+
+def determine_order(singular_values, threshold=1e-10):
+    normalized_sv = singular_values / singular_values[0]
+    n = (normalized_sv > threshold).sum()
+    return n
 
 
 def kl_diagonal_gaussian_canon(m_f, P_f_diag, m_p, P_p_diag):

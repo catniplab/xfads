@@ -28,10 +28,11 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
                 p_mask_y_in: float=0.0,
                 p_mask_apb: float = 0.0,
                 p_mask_a: float = 0.0,
-                p_mask_b: float = 0.0):
+                p_mask_b: float = 0.0,
+                get_P_s: bool = False):
 
         z_s, stats = self.fast_smooth_1_to_T(y, n_samples, p_mask_apb=p_mask_apb, p_mask_y_in=p_mask_y_in,
-                                             p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True)
+                                             p_mask_a=p_mask_a, p_mask_b=p_mask_b, get_kl=True, get_P_s=get_P_s)
 
         ell = self.likelihood_pdf.get_ell(y, z_s).mean(dim=0)
         loss = stats['kl'] - ell
@@ -71,7 +72,8 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
                            p_mask_y_in: float=0.0,
                            p_mask_b: float=0.0,
                            get_kl: bool=False,
-                           get_v: bool=False):
+                           get_v: bool=False,
+                           get_P_s: bool=False):
 
         device = y.device
         n_trials, n_time_bins, n_neurons = y.shape
@@ -96,7 +98,7 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         k = t_mask_apb[..., None] * k
         K = t_mask_apb[..., None, None] * K
 
-        z_s, stats = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v)
+        z_s, stats = self.nl_filter(k, K, n_samples, get_kl=get_kl, get_v=get_v, get_P_s=get_P_s)
         stats['t_mask_y_in'] = t_mask_y_in
 
         return z_s, stats
@@ -372,7 +374,8 @@ class NonlinearFilterSmallL(nn.Module):
                 n_samples: int,
                 get_v: bool=False,
                 get_kl: bool=False,
-                p_mask: float=0.0):
+                p_mask: float=0.0,
+                get_P_s: bool=False):
 
         # mask data, 0: data available, 1: data missing
         n_trials, n_time_bins, n_latents, rank = K.shape
@@ -561,7 +564,10 @@ def fast_update_step(z_p_c, h_p, k, K, w_f, M_c_p, Q_diag):
     m = fast_bmv_P_f(K, Psi, M_c_p, Q_diag, h)
 
     v_1 = bmv(K.mT, z_p_c) + w_f
-    z = m + z_p_c - bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    # z = m + z_p_c - bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    unscaled_update = bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    scaled_update = fast_bmv_P_p(M_c_p, Q_diag, unscaled_update)
+    z = m + z_p_c - scaled_update
     return m, z, Psi
 
 
@@ -627,7 +633,10 @@ def fast_update_step_0(z_p_c, h_p, k, K, w_f, P_p_diag):
     m = m_1 - m_2
 
     v_1 = bmv(K.mT, z_p_c) + w_f
-    z = m + z_p_c - bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    # z = m + z_p_c - bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    unscaled_update = bmv(K, chol_bmv_solve(I_r_pl_triple_chol, v_1))
+    scaled_update = P_p_diag * unscaled_update
+    z = m + z_p_c - scaled_update
 
     return m, z, Psi
 
