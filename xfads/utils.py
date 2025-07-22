@@ -6,7 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as Fn
 
 from sklearn.linear_model import Ridge
-from xfads.linalg_utils import bmv
+from xfads.linalg_utils import bmv, bip, bop
+from xfads.ssm_modules.likelihoods import PoissonLikelihood, GaussianLikelihood
+
 
 
 class RMSNorm(nn.Module):
@@ -429,3 +431,24 @@ class LowRankRegressor(nn.Module):
 
     def forward(self, x):
         return torch.sum(self.A @ x @ self.B, dim=[-2, -1]) + self.c
+
+
+def get_latent_rotation(likelihood_pdf):
+    if isinstance(likelihood_pdf.readout_fn, nn.Sequential):
+        readout_fn = likelihood_pdf.readout_fn[-1]
+    else:
+        readout_fn = likelihood_pdf.readout_fn
+
+    if isinstance(likelihood_pdf, PoissonLikelihood):
+        R = torch.exp(likelihood_pdf.delta * readout_fn.bias)
+        C_scaled = readout_fn.weight / R.unsqueeze(-1).sqrt()
+
+    elif isinstance(likelihood_pdf, GaussianLikelihood):
+        R = Fn.softplus(likelihood_pdf.log_R)
+        C_scaled = readout_fn.weight / R.unsqueeze(-1).sqrt()
+
+    U, S, VmT = torch.linalg.svd(C_scaled, full_matrices=False)
+    return S * VmT, S
+
+
+
