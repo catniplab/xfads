@@ -387,7 +387,7 @@ def get_latent_rotation(likelihood_pdf):
         readout_fn = likelihood_pdf.readout_fn
 
     if isinstance(likelihood_pdf, PoissonLikelihood):
-        R = torch.exp(likelihood_pdf.delta * readout_fn.bias)
+        R = likelihood_pdf.delta * torch.exp(readout_fn.bias)
         C_scaled = readout_fn.weight / R.unsqueeze(-1).sqrt()
 
     elif isinstance(likelihood_pdf, GaussianLikelihood):
@@ -395,7 +395,7 @@ def get_latent_rotation(likelihood_pdf):
         C_scaled = readout_fn.weight / R.unsqueeze(-1).sqrt()
 
     U, S, VmT = torch.linalg.svd(C_scaled, full_matrices=False)
-    return S * VmT, S
+    return S.unsqueeze(-1) * VmT, S, U
 
 
 
