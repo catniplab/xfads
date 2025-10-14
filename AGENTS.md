@@ -57,3 +57,7 @@ def normalize(x: torch.Tensor) -> torch.Tensor:
 
 ## Architecture Overview
 - Core workflow: define `ssm_modules` → assemble model in `smoothers` → train/evaluate via Lightning trainers → run via `examples/*` using Hydra configs.
+
+## Agent Logging
+- Record every repository modification in `CHANGELOG.md` with a UTC timestamp in the format `YYYY-MM-DD HH:MM:SSZ - update`.
+- Append new entries to the bottom of the file so the log remains chronological.
