@@ -1,3 +1,10 @@
+"""
+PyTorch Lightning trainers for XFADS state-space models.
+
+The trainers encapsulate training loops, logging utilities, and evaluation
+metrics for the various XFADS smoother configurations used in experiments.
+"""
+
 import math
 import time
 import copy
@@ -9,7 +16,23 @@ from .. import utils, prob_utils
 
 
 class LightningNonlinearSSM(lightning.LightningModule):
+    """
+    Lightning module for training low-rank nonlinear state-space models.
+
+    The trainer applies dropout masks during training, logs ELBO metrics,
+    and clips latent process noise parameters after each optimization step.
+    """
+
     def __init__(self, ssm, cfg):
+        """
+        Parameters
+        ----------
+        ssm : torch.nn.Module
+            Smoother module implementing the XFADS variational objective.
+        cfg : Any
+            Configuration object providing learning rates, dropout masks,
+            and sample counts.
+        """
         super().__init__()
 
         self.ssm = ssm
@@ -25,6 +48,14 @@ class LightningNonlinearSSM(lightning.LightningModule):
         self.save_hyperparameters(ignore=["ssm", "cfg"])
 
     def configure_optimizers(self):
+        """
+        Set up the Adam optimizer and exponential learning-rate schedule.
+
+        Returns
+        -------
+        dict
+            Optimizer and scheduler specification compatible with Lightning.
+        """
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer, gamma=self.cfg.lr_gamma_decay
@@ -32,6 +63,22 @@ class LightningNonlinearSSM(lightning.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler}}
 
     def training_step(self, batch, batch_idx):
+        """
+        Perform a single ELBO optimization step.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Mini-batch where the first entry contains observations with shape
+            ``[batch, time, neurons]``.
+        batch_idx : int
+            Index of the batch within the current epoch.
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar loss used for optimizer updates.
+        """
         y = batch[0]
 
         p_mask_y_in_t = self.p_mask_y_in
@@ -82,6 +129,21 @@ class LightningNonlinearSSM(lightning.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Evaluate the ELBO on the validation set without gradient updates.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Validation batch containing observations.
+        batch_idx : int
+            Index of the validation batch.
+
+        Returns
+        -------
+        torch.Tensor
+            Validation loss for logging.
+        """
         y = batch[0]
 
         with torch.no_grad():
@@ -98,6 +160,21 @@ class LightningNonlinearSSM(lightning.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
+        """
+        Evaluate the ELBO on the test set.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Test batch containing observations.
+        batch_idx : int
+            Index of the test batch.
+
+        Returns
+        -------
+        torch.Tensor
+            Test loss for logging.
+        """
         y = batch[0]
 
         with torch.no_grad():
@@ -114,6 +191,12 @@ class LightningNonlinearSSM(lightning.LightningModule):
         return loss
 
     def optimizer_step(self, *args, **kwargs):
+        """
+        Apply optimization step and enforce positivity constraints.
+
+        Clamps the latent process noise parameters to keep the softplus depth
+        within a numerically stable range.
+        """
         super().optimizer_step(*args, **kwargs)
 
         with torch.no_grad():
@@ -129,10 +212,40 @@ class LightningNonlinearSSM(lightning.LightningModule):
 
 
 class LightningNonlinearSSMwithInput(LightningNonlinearSSM):
+    """
+    Lightning trainer for models that consume external input sequences.
+
+    The class extends :class:`LightningNonlinearSSM` by passing control inputs
+    to the smoother during training and validation.
+    """
+
     def __init__(self, ssm, cfg):
+        """
+        Parameters
+        ----------
+        ssm : torch.nn.Module
+            Input-aware smoother module.
+        cfg : Any
+            Configuration namespace shared with the base trainer.
+        """
         super().__init__(ssm, cfg)
 
     def training_step(self, batch, batch_idx):
+        """
+        Perform a training iteration using observations and inputs.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Batch containing observations and aligned inputs.
+        batch_idx : int
+            Index of the batch within the current epoch.
+
+        Returns
+        -------
+        torch.Tensor
+            Loss scalar for optimization.
+        """
         y = batch[0]
         u = batch[1]
 
@@ -185,6 +298,21 @@ class LightningNonlinearSSMwithInput(LightningNonlinearSSM):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Evaluate the model on validation data with inputs.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Batch containing observations and inputs.
+        batch_idx : int
+            Index of the validation batch.
+
+        Returns
+        -------
+        torch.Tensor
+            Validation loss.
+        """
         y = batch[0]
         u = batch[1]
 
@@ -202,6 +330,21 @@ class LightningNonlinearSSMwithInput(LightningNonlinearSSM):
         return loss
 
     def test_step(self, batch, batch_idx):
+        """
+        Evaluate the model on test data with inputs.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Batch containing observations and inputs.
+        batch_idx : int
+            Index of the test batch.
+
+        Returns
+        -------
+        torch.Tensor
+            Test loss.
+        """
         y = batch[0]
         u = batch[1]
 
@@ -220,7 +363,23 @@ class LightningNonlinearSSMwithInput(LightningNonlinearSSM):
 
 
 class LightningNlbNonlinearSSM(lightning.LightningModule):
+    """
+    Lightning trainer for neural latent bandit (NLB) benchmarking.
+
+    This trainer tracks bits-per-spike metrics, velocity decoding accuracy,
+    and applies optional contrastive divergence updates when training held-in
+    and held-out neuron encoders jointly.
+    """
+
     def __init__(self, ssm, cfg):
+        """
+        Parameters
+        ----------
+        ssm : torch.nn.Module
+            Encoder-aware smoother supporting held-in/held-out prediction.
+        cfg : Any
+            Configuration namespace containing optimization and dropout params.
+        """
         super().__init__()
 
         self.ssm = ssm
@@ -243,6 +402,21 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
         self.train_veloc = []
 
     def training_step(self, batch, batch_idx):
+        """
+        Perform a training iteration and log NLB-specific metrics.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Observations and velocity targets for NLB evaluation.
+        batch_idx : int
+            Index of the batch within the epoch.
+
+        Returns
+        -------
+        torch.Tensor
+            ELBO loss used for optimization.
+        """
         y_obs = batch[0]
         n_neurons_enc = self.ssm.n_neurons_enc
         n_time_bins_enc = self.ssm.n_time_bins_enc
@@ -327,6 +501,21 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Evaluate held-in/held-out prediction quality on validation batches.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Observations and velocity targets.
+        batch_idx : int
+            Validation batch index.
+
+        Returns
+        -------
+        torch.Tensor
+            Validation ELBO loss.
+        """
         y_obs = batch[0]
         n_neurons_enc = self.ssm.n_neurons_enc
         n_time_bins_enc = self.ssm.n_time_bins_enc
@@ -380,6 +569,14 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        """
+        Configure optimizer and learning-rate schedule for NLB training.
+
+        Returns
+        -------
+        dict
+            Optimizer and scheduler specification.
+        """
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer, gamma=self.cfg.lr_gamma_decay
@@ -387,6 +584,9 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler}}
 
     def optimizer_step(self, *args, **kwargs):
+        """
+        Run the optimizer step and clamp process noise parameters.
+        """
         super().optimizer_step(*args, **kwargs)
 
         with torch.no_grad():
@@ -401,6 +601,9 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
             )
 
     def on_validation_epoch_end(self):
+        """
+        Fit a ridge decoder on smoothed rates to report velocity R².
+        """
         if self.current_epoch < 1:
             self.valid_rates = []
             self.train_rates = []
@@ -450,9 +653,32 @@ class LightningNlbNonlinearSSM(lightning.LightningModule):
 
 
 class LightningMonkeyReaching(lightning.LightningModule):
+    """
+    Lightning trainer for monkey reaching experiments with held-in prediction.
+
+    Tracks velocity decoding performance, manages best checkpoints for
+    encoder and predictor models, and supports optional input conditioning.
+    """
+
     def __init__(
         self, ssm, cfg, n_time_bins_enc, bin_prd_start, is_svae=False, use_input=False
     ):
+        """
+        Parameters
+        ----------
+        ssm : torch.nn.Module
+            Smoother module tailored to the monkey reaching dataset.
+        cfg : Any
+            Configuration namespace with optimization parameters.
+        n_time_bins_enc : int
+            Number of time bins used for encoder training.
+        bin_prd_start : int
+            Time index at which prediction-only evaluation begins.
+        is_svae : bool, optional
+            Flag for SVAE-compatible logging, by default False.
+        use_input : bool, optional
+            Whether inputs are supplied to the smoother, by default False.
+        """
         super().__init__()
 
         self.ssm = ssm
@@ -487,6 +713,21 @@ class LightningMonkeyReaching(lightning.LightningModule):
         self.best_ssm_prd = None
 
     def training_step(self, batch, batch_idx):
+        """
+        Perform a training iteration and record encoder statistics.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Observations, kinematics, and optionally inputs.
+        batch_idx : int
+            Batch index within the epoch.
+
+        Returns
+        -------
+        torch.Tensor
+            Training loss.
+        """
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
@@ -571,6 +812,21 @@ class LightningMonkeyReaching(lightning.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Evaluate encoder and predictor metrics on validation data.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Observations, kinematics, and optionally inputs.
+        batch_idx : int
+            Index of the validation batch.
+
+        Returns
+        -------
+        torch.Tensor
+            Validation loss.
+        """
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
@@ -648,6 +904,21 @@ class LightningMonkeyReaching(lightning.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
+        """
+        Evaluate the trained models on the test split and log velocities.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Observations, kinematics, and optionally inputs.
+        batch_idx : int
+            Index of the test batch.
+
+        Returns
+        -------
+        torch.Tensor
+            Test loss.
+        """
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
@@ -756,6 +1027,14 @@ class LightningMonkeyReaching(lightning.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        """
+        Configure optimizer and scheduler for the reaching experiment.
+
+        Returns
+        -------
+        dict
+            Optimizer and scheduler specification.
+        """
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer, gamma=self.cfg.lr_gamma_decay
@@ -763,6 +1042,9 @@ class LightningMonkeyReaching(lightning.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler}}
 
     def optimizer_step(self, *args, **kwargs):
+        """
+        Run the optimizer step and optionally clip dynamics singular values.
+        """
         super().optimizer_step(*args, **kwargs)
 
         with torch.no_grad():
@@ -782,6 +1064,10 @@ class LightningMonkeyReaching(lightning.LightningModule):
                 self.ssm.dynamics_mod.mean_fn.weight.data = (U * S.clip(max=0.98)) @ VmT
 
     def on_validation_epoch_end(self):
+        """
+        Fit ridge decoders to report reaching velocity performance and
+        maintain the best-performing encoder/predictor checkpoints.
+        """
         if self.current_epoch == 0:
             self.log(
                 "r2_valid_enc",
@@ -883,7 +1169,28 @@ class LightningMonkeyReaching(lightning.LightningModule):
 
 
 class LightningDMFCRSG(lightning.LightningModule):
+    """
+    Lightning trainer for DMFC reaching datasets with prediction rollouts.
+
+    Maintains separate best checkpoints for encoder and predictor performance
+    based on bits-per-spike metrics.
+    """
+
     def __init__(self, ssm, cfg, n_time_bins_enc, n_time_bins_prd, is_svae=False):
+        """
+        Parameters
+        ----------
+        ssm : torch.nn.Module
+            Smoother configured for DMFC experiments.
+        cfg : Any
+            Training configuration namespace.
+        n_time_bins_enc : int
+            Number of encoding time bins.
+        n_time_bins_prd : int
+            Number of time bins reserved for prediction.
+        is_svae : bool, optional
+            Whether to apply SVAE-specific constraints, by default False.
+        """
         super().__init__()
 
         self.ssm = ssm
@@ -908,6 +1215,21 @@ class LightningDMFCRSG(lightning.LightningModule):
         self.best_ssm_prd = None
 
     def training_step(self, batch, batch_idx):
+        """
+        Perform a training iteration and log encoding performance.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Observations for encoding and prediction.
+        batch_idx : int
+            Batch index within the epoch.
+
+        Returns
+        -------
+        torch.Tensor
+            Training loss.
+        """
         y_obs = batch[0]
         n_time_bins_enc = self.n_time_bins_enc
 
@@ -975,6 +1297,21 @@ class LightningDMFCRSG(lightning.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Evaluate encoder and predictor metrics on validation data.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Observations for validation.
+        batch_idx : int
+            Validation batch index.
+
+        Returns
+        -------
+        torch.Tensor
+            Validation loss.
+        """
         y_obs = batch[0]
         n_time_bins_enc = self.n_time_bins_enc
 
@@ -1036,6 +1373,21 @@ class LightningDMFCRSG(lightning.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
+        """
+        Evaluate saved encoder/predictor checkpoints on the test set.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, ...]
+            Observations for testing.
+        batch_idx : int
+            Test batch index.
+
+        Returns
+        -------
+        torch.Tensor
+            Test loss.
+        """
         y_obs = batch[0]
         n_time_bins_enc = self.n_time_bins_enc
 
@@ -1092,6 +1444,14 @@ class LightningDMFCRSG(lightning.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        """
+        Configure optimizer and plateau-based scheduler for DMFC training.
+
+        Returns
+        -------
+        dict
+            Optimizer and scheduler configuration.
+        """
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.95)
         return {
@@ -1104,6 +1464,9 @@ class LightningDMFCRSG(lightning.LightningModule):
         }
 
     def optimizer_step(self, *args, **kwargs):
+        """
+        Run the optimizer step and clamp process noise parameters.
+        """
         super().optimizer_step(*args, **kwargs)
 
         with torch.no_grad():
@@ -1124,7 +1487,24 @@ class LightningDMFCRSG(lightning.LightningModule):
 
 
 class LightningPendulum(lightning.LightningModule):
+    """
+    Lightning trainer for pendulum dynamics experiments.
+
+    Evaluates latent reconstructions and velocity decoding quality, keeping
+    track of the best-performing encoder checkpoints for downstream metrics.
+    """
+
     def __init__(self, ssm, cfg, n_time_bins_enc):
+        """
+        Parameters
+        ----------
+        ssm : torch.nn.Module
+            Pendulum smoother module.
+        cfg : Any
+            Training configuration namespace.
+        n_time_bins_enc : int
+            Number of time bins used for encoder training.
+        """
         # z_true[:, :, 0] = cosPhi
         # z_true[:, :, 1] = sinPhi
         # z_true[:, :, 2] = phiDot
@@ -1157,6 +1537,21 @@ class LightningPendulum(lightning.LightningModule):
         self.best_ssm_prd = None
 
     def training_step(self, batch, batch_idx):
+        """
+        Perform a training step and log reconstruction metrics.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Observations and pendulum state targets.
+        batch_idx : int
+            Batch index within the epoch.
+
+        Returns
+        -------
+        torch.Tensor
+            Training loss.
+        """
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
@@ -1228,6 +1623,21 @@ class LightningPendulum(lightning.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Evaluate reconstruction error and collect latent trajectories.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Observations and pendulum state targets.
+        batch_idx : int
+            Validation batch index.
+
+        Returns
+        -------
+        torch.Tensor
+            Validation loss.
+        """
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
@@ -1267,6 +1677,21 @@ class LightningPendulum(lightning.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
+        """
+        Evaluate the held-out reconstruction and velocity decoding metrics.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Observations and pendulum state targets.
+        batch_idx : int
+            Test batch index.
+
+        Returns
+        -------
+        torch.Tensor
+            Test loss.
+        """
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
@@ -1341,6 +1766,14 @@ class LightningPendulum(lightning.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        """
+        Configure optimizer and scheduler for pendulum training.
+
+        Returns
+        -------
+        dict
+            Optimizer and scheduler configuration understood by Lightning.
+        """
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer, gamma=self.cfg.lr_gamma_decay
@@ -1348,6 +1781,7 @@ class LightningPendulum(lightning.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler}}
 
     def optimizer_step(self, *args, **kwargs):
+        """Apply optimizer step and clamp dynamics parameters."""
         super().optimizer_step(*args, **kwargs)
 
         with torch.no_grad():
@@ -1362,6 +1796,7 @@ class LightningPendulum(lightning.LightningModule):
             )
 
     def on_validation_epoch_end(self):
+        """Fit decoders on latents to report pendulum velocity metrics."""
         if self.current_epoch > 0:
             n_time_bins_enc = self.n_time_bins_enc
             m_train = torch.cat(self.train_z, dim=1).mean(dim=0)
@@ -1463,7 +1898,26 @@ class LightningPendulum(lightning.LightningModule):
 
 
 class LightningBouncingBall(lightning.LightningModule):
+    """
+    Lightning trainer for the bouncing ball dataset.
+
+    Logs reconstruction error, latent decoding metrics, and maintains the
+    best encoder checkpoint for final evaluation.
+    """
+
     def __init__(self, ssm, cfg, n_time_bins_enc, is_svae=False):
+        """
+        Parameters
+        ----------
+        ssm : torch.nn.Module
+            Bouncing ball smoother module.
+        cfg : Any
+            Training configuration namespace.
+        n_time_bins_enc : int
+            Number of time bins used for encoder training.
+        is_svae : bool, optional
+            Whether to apply SVAE-specific constraints, by default False.
+        """
         # x[n, :, 0] = x_loc
         # x[n, :, 1] = y_loc
         super().__init__()
@@ -1495,6 +1949,21 @@ class LightningBouncingBall(lightning.LightningModule):
         self.best_ssm_prd = None
 
     def training_step(self, batch, batch_idx):
+        """
+        Perform a training iteration on the bouncing ball dataset.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Observations and latent targets.
+        batch_idx : int
+            Batch index within the epoch.
+
+        Returns
+        -------
+        torch.Tensor
+            Training loss.
+        """
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
@@ -1565,6 +2034,21 @@ class LightningBouncingBall(lightning.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Evaluate reconstruction quality on the validation set.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Observations and latent targets.
+        batch_idx : int
+            Validation batch index.
+
+        Returns
+        -------
+        torch.Tensor
+            Validation loss.
+        """
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
@@ -1604,6 +2088,21 @@ class LightningBouncingBall(lightning.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
+        """
+        Evaluate reconstruction and latent decoding on the test set.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor]
+            Observations and latent targets.
+        batch_idx : int
+            Test batch index.
+
+        Returns
+        -------
+        torch.Tensor
+            Test loss.
+        """
         y_obs = batch[0]
         x_obs = batch[1]
         n_time_bins_enc = self.n_time_bins_enc
@@ -1678,6 +2177,14 @@ class LightningBouncingBall(lightning.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        """
+        Configure optimizer and scheduler for bouncing ball training.
+
+        Returns
+        -------
+        dict
+            Optimizer and scheduler specification.
+        """
         optimizer = torch.optim.Adam(self.ssm.parameters(), lr=self.cfg.lr)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer, gamma=self.cfg.lr_gamma_decay
@@ -1685,6 +2192,7 @@ class LightningBouncingBall(lightning.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler}}
 
     def optimizer_step(self, *args, **kwargs):
+        """Clamp dynamics parameters after each optimization step."""
         super().optimizer_step(*args, **kwargs)
 
         with torch.no_grad():
@@ -1704,6 +2212,9 @@ class LightningBouncingBall(lightning.LightningModule):
                 self.ssm.dynamics_mod.mean_fn.weight.data = (U * S.clip(max=1.0)) @ VmT
 
     def on_validation_epoch_end(self):
+        """
+        Fit regressors on latents to compute position/velocity decoding R².
+        """
         # if self.current_epoch == 0 or self.current_epoch == (self.cfg.check_val_every_n_epoch - 1):
         #     self.log("r2_valid_enc", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         #     self.log("r2_valid_prd", -1., on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)

@@ -1,3 +1,11 @@
+"""
+Causal smoother variants for low-rank nonlinear state-space models.
+
+The routines in this module implement causal filtering and smoothing updates
+that operate on canonical statistics produced by encoder networks. They are
+used for sequential inference where future observations are not incorporated.
+"""
+
 import math
 import torch
 from torch import nn
@@ -7,6 +15,28 @@ from ..linalg_utils import bmv, bip, chol_bmv_solve
 
 
 class LowRankNonlinearStateSpaceModel(nn.Module):
+    """
+    Causal variational smoother for low-rank nonlinear state-space models.
+
+    This module only incorporates past observations when inferring latent
+    trajectories, enabling streaming or online inference scenarios.
+
+    Parameters
+    ----------
+    dynamics_mod : nn.Module
+        Latent dynamics module with ``mean_fn`` and ``log_Q`` parameters.
+    likelihood_pdf : nn.Module
+        Emission model supporting ``get_ell`` for log-likelihood evaluation.
+    initial_c_pdf : nn.Module
+        Initial latent distribution exposing ``m_0`` and ``log_Q_0`` tensors.
+    backward_encoder : nn.Module
+        Encoder producing backward canonical statistics ``(k_b, K_b)``.
+    local_encoder : nn.Module
+        Encoder producing forward canonical statistics ``(k_y, K_y)``.
+    nl_filter : nn.Module
+        Nonlinear filter operating on canonical statistics.
+    """
+
     def __init__(
         self,
         dynamics_mod,
@@ -16,6 +46,24 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         local_encoder,
         nl_filter,
     ):
+        """
+        Initialize the causal smoother components.
+
+        Parameters
+        ----------
+        dynamics_mod : nn.Module
+            Latent dynamics module.
+        likelihood_pdf : nn.Module
+            Emission likelihood module.
+        initial_c_pdf : nn.Module
+            Initial latent distribution.
+        backward_encoder : nn.Module
+            Network providing backward canonical statistics.
+        local_encoder : nn.Module
+            Network providing forward canonical statistics.
+        nl_filter : nn.Module
+            Filtering backend for canonical statistics.
+        """
         super().__init__()
 
         self.nl_filter = nl_filter
@@ -36,6 +84,31 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         p_mask_apb: float = 0.0,
         get_P_s: bool = False,
     ):
+        """
+        Compute the ELBO and smoothed latents given observations.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observation tensor with shape ``[batch, time, neurons]``.
+        n_samples : int
+            Number of latent samples drawn by the filter.
+        p_mask_y_in : float, optional
+            Observation dropout probability, by default 0.0.
+        p_mask_a : float, optional
+            Dropout probability for forward encoder statistics, by default 0.0.
+        p_mask_b : float, optional
+            Dropout probability for backward encoder statistics, by default 0.0.
+        p_mask_apb : float, optional
+            Dropout probability for combined statistics (unused), by default 0.0.
+        get_P_s : bool, optional
+            If True, request smoothed covariance estimates.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]
+            Loss scalar, smoothed latent samples, and statistics dictionary.
+        """
         z_s, stats = self.fast_smooth_1_to_T(
             y,
             n_samples,
@@ -61,6 +134,29 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         p_mask_b: float = 0.0,
         p_mask_apb: float = 0.0,
     ):
+        """
+        Run causal filtering without smoothing the future.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observation tensor with shape ``[batch, time, neurons]``.
+        n_samples : int
+            Number of latent samples drawn by the filter.
+        p_mask_y_in : float, optional
+            Observation dropout probability, by default 0.0.
+        p_mask_a : float, optional
+            Dropout probability for forward encoder statistics, by default 0.0.
+        p_mask_b : float, optional
+            Dropout probability for backward encoder statistics, by default 0.0.
+        p_mask_apb : float, optional
+            Unused dropout probability for API compatibility, by default 0.0.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]
+            Loss scalar, filtered latent samples, and statistics dictionary.
+        """
         z_f, stats = self.fast_filter_1_to_T(
             y,
             n_samples,
@@ -87,6 +183,33 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         get_v: bool = False,
         get_P_s: bool = False,
     ):
+        """
+        Run the causal smoother across all time steps.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observation tensor shaped ``[batch, time, neurons]``.
+        n_samples : int
+            Number of samples produced by the nonlinear filter.
+        p_mask_a : float, optional
+            Dropout probability for forward encoder statistics, by default 0.0.
+        p_mask_y_in : float, optional
+            Observation dropout probability, by default 0.0.
+        p_mask_b : float, optional
+            Dropout probability for backward encoder statistics, by default 0.0.
+        get_kl : bool, optional
+            If True, include KL divergence statistics, by default False.
+        get_v : bool, optional
+            Unused placeholder for variance requests, by default False.
+        get_P_s : bool, optional
+            If True, include smoothed covariance estimates in the stats dict.
+
+        Returns
+        -------
+        tuple[torch.Tensor, dict[str, torch.Tensor]]
+            Smoothed latent samples and associated statistics.
+        """
         n_trials, n_time_bins, n_neurons = y.shape
 
         t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
@@ -121,6 +244,31 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         get_kl: bool = False,
         get_v: bool = False,
     ):
+        """
+        Run the causal filter to produce latent trajectories.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observation tensor shaped ``[batch, time, neurons]``.
+        n_samples : int
+            Number of latent samples produced by the filter.
+        p_mask_a : float, optional
+            Dropout probability for forward encoder statistics, by default 0.0.
+        p_mask_y_in : float, optional
+            Observation dropout probability, by default 0.0.
+        p_mask_b : float, optional
+            Dropout probability for backward encoder statistics, by default 0.0.
+        get_kl : bool, optional
+            If True, include KL divergence terms, by default False.
+        get_v : bool, optional
+            Unused placeholder for predictive variance, by default False.
+
+        Returns
+        -------
+        tuple[torch.Tensor, dict[str, torch.Tensor]]
+            Filtered latent samples and statistics dictionary.
+        """
         n_trials, n_time_bins, n_neurons = y.shape
 
         t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
@@ -144,6 +292,21 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         return z_s, stats
 
     def predict_forward(self, z_tm1: torch.Tensor, n_bins: int):
+        """
+        Simulate latent trajectories forward using the dynamics model.
+
+        Parameters
+        ----------
+        z_tm1 : torch.Tensor
+            Initial latent state with shape ``[batch, latents]``.
+        n_bins : int
+            Number of future steps to generate.
+
+        Returns
+        -------
+        torch.Tensor
+            Simulated latent states with shape ``[batch, latents, n_bins]``.
+        """
         z_forward = []
         Q_sqrt = torch.sqrt(Fn.softplus(self.dynamics_mod.log_Q))
 
@@ -164,6 +327,13 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
 
 
 class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
+    """
+    Causal smoother variant that conditions on exogenous input signals.
+
+    Inputs are incorporated through the nonlinear filter, enabling behaviour
+    models that depend on external controls or stimuli.
+    """
+
     def __init__(
         self,
         dynamics_mod,
@@ -173,6 +343,22 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         local_encoder,
         nl_filter,
     ):
+        """
+        Parameters
+        ----------
+        dynamics_mod : nn.Module
+            Latent dynamics module.
+        likelihood_pdf : nn.Module
+            Emission likelihood module.
+        initial_c_pdf : nn.Module
+            Initial latent distribution.
+        backward_encoder : nn.Module
+            Backward encoder providing canonical statistics.
+        local_encoder : nn.Module
+            Forward encoder providing canonical statistics.
+        nl_filter : nn.Module
+            Input-aware nonlinear filtering backend.
+        """
         super().__init__(
             dynamics_mod,
             likelihood_pdf,
@@ -193,6 +379,31 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         p_mask_b: float = 0.0,
         p_mask_apb: float = 0.0,
     ):
+        """
+        Compute the ELBO conditioned on observations and inputs.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observation tensor shaped ``[batch, time, neurons]``.
+        u : torch.Tensor
+            Input tensor aligned with the observation time axis.
+        n_samples : int
+            Number of latent samples drawn by the filter.
+        p_mask_y_in : float, optional
+            Observation dropout probability, by default 0.0.
+        p_mask_a : float, optional
+            Dropout probability for forward encoder statistics, by default 0.0.
+        p_mask_b : float, optional
+            Dropout probability for backward encoder statistics, by default 0.0.
+        p_mask_apb : float, optional
+            Unused dropout probability for API compatibility, by default 0.0.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]
+            Loss scalar, smoothed latent samples, and statistics dictionary.
+        """
         z_s, stats = self.fast_smooth_1_to_T(
             y,
             u,
@@ -218,6 +429,31 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         p_mask_b: float = 0.0,
         p_mask_apb: float = 0.0,
     ):
+        """
+        Run causal filtering with inputs and compute the ELBO contribution.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observation tensor shaped ``[batch, time, neurons]``.
+        u : torch.Tensor
+            Input tensor aligned with observations.
+        n_samples : int
+            Number of latent samples to draw.
+        p_mask_y_in : float, optional
+            Observation dropout probability, by default 0.0.
+        p_mask_a : float, optional
+            Dropout probability for forward encoder statistics, by default 0.0.
+        p_mask_b : float, optional
+            Dropout probability for backward encoder statistics, by default 0.0.
+        p_mask_apb : float, optional
+            Unused dropout probability for API compatibility, by default 0.0.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]
+            Loss scalar, filtered latent samples, and statistics dict.
+        """
         z_f, stats = self.fast_filter_1_to_T(
             y,
             u,
@@ -245,6 +481,33 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         get_kl: bool = False,
         get_v: bool = False,
     ):
+        """
+        Run the causal smoother conditioned on inputs.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observation tensor shaped ``[batch, time, neurons]``.
+        u : torch.Tensor
+            Input tensor aligned with ``y``.
+        n_samples : int
+            Number of latent samples produced by the filter.
+        p_mask_a : float, optional
+            Dropout probability for forward encoder statistics, by default 0.0.
+        p_mask_y_in : float, optional
+            Observation dropout probability, by default 0.0.
+        p_mask_b : float, optional
+            Dropout probability for backward encoder statistics, by default 0.0.
+        get_kl : bool, optional
+            If True, include KL divergence terms, by default False.
+        get_v : bool, optional
+            Unused placeholder for predictive variance, by default False.
+
+        Returns
+        -------
+        tuple[torch.Tensor, dict[str, torch.Tensor]]
+            Smoothed latent samples and statistics dictionary.
+        """
         n_trials, n_time_bins, n_neurons = y.shape
 
         t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
@@ -278,6 +541,33 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         get_kl: bool = False,
         get_v: bool = False,
     ):
+        """
+        Run the causal filter conditioned on inputs.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observation tensor shaped ``[batch, time, neurons]``.
+        u : torch.Tensor
+            Input tensor aligned with the time dimension.
+        n_samples : int
+            Number of latent samples drawn by the filter.
+        p_mask_a : float, optional
+            Dropout probability for forward encoder statistics, by default 0.0.
+        p_mask_y_in : float, optional
+            Observation dropout probability, by default 0.0.
+        p_mask_b : float, optional
+            Dropout probability for backward encoder statistics, by default 0.0.
+        get_kl : bool, optional
+            If True, return KL divergence terms, by default False.
+        get_v : bool, optional
+            Unused placeholder for predictive variance, by default False.
+
+        Returns
+        -------
+        tuple[torch.Tensor, dict[str, torch.Tensor]]
+            Filtered latent samples and statistics dictionary.
+        """
         n_trials, n_time_bins, n_neurons = y.shape
 
         t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
@@ -301,6 +591,23 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         return z_s, stats
 
     def predict_forward(self, z_tm1: torch.Tensor, u: torch.Tensor, n_bins: int):
+        """
+        Simulate latent trajectories forward while incorporating inputs.
+
+        Parameters
+        ----------
+        z_tm1 : torch.Tensor
+            Latent state at time ``t-1`` with shape ``[batch, latents]``.
+        u : torch.Tensor
+            Input sequence shaped ``[batch, time, input_dim]``.
+        n_bins : int
+            Number of future steps to generate.
+
+        Returns
+        -------
+        torch.Tensor
+            Simulated latent states with shape ``[batch, latents, n_bins]``.
+        """
         z_forward = []
         Q_sqrt = torch.sqrt(Fn.softplus(self.dynamics_mod.log_Q))
 
@@ -322,6 +629,25 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
 
 
 def get_P_s_t(Q_diag, M_p_c_t, K_a, K_b):
+    """
+    Compute the smoothed covariance for time ``t`` in the causal model.
+
+    Parameters
+    ----------
+    Q_diag : torch.Tensor
+        Process noise diagonal entries with shape ``[latents]``.
+    M_p_c_t : torch.Tensor
+        Predictive covariance factors shaped ``[batch, latents, rank]``.
+    K_a : torch.Tensor
+        Forward canonical precision factors ``[batch, latents, rank]``.
+    K_b : torch.Tensor
+        Backward canonical precision factors ``[batch, latents, rank]``.
+
+    Returns
+    -------
+    torch.Tensor
+        Smoothed covariance matrix ``[batch, latents, latents]``.
+    """
     # TODO: optimize order of operations
     K = torch.cat([K_a, K_b], dim=-1)
     P_p_t = M_p_c_t @ M_p_c_t.mT + torch.diag(Q_diag)
@@ -333,6 +659,23 @@ def get_P_s_t(Q_diag, M_p_c_t, K_a, K_b):
 
 
 def get_P_s_1(Q_0_diag, K_a, K_b):
+    """
+    Compute the smoothed covariance at the initial time step.
+
+    Parameters
+    ----------
+    Q_0_diag : torch.Tensor
+        Initial process noise diagonal entries.
+    K_a : torch.Tensor
+        Forward canonical precision factors at time zero.
+    K_b : torch.Tensor
+        Backward canonical precision factors at time zero.
+
+    Returns
+    -------
+    torch.Tensor
+        Initial smoothed covariance matrix of shape ``[batch, latents, latents]``.
+    """
     # TODO: optimize order of operations
     P_p_t = torch.diag(Q_0_diag)
     K = torch.cat([K_a, K_b], dim=-1)
@@ -343,7 +686,22 @@ def get_P_s_1(Q_0_diag, K_a, K_b):
 
 
 class NonlinearFilter(nn.Module):
+    """
+    Causal low-rank nonlinear filter that propagates variational posteriors.
+
+    The filter takes forward and backward canonical statistics to compute the
+    smoothed latent distribution while only consuming past observations.
+    """
+
     def __init__(self, dynamics_mod, initial_c_pdf):
+        """
+        Parameters
+        ----------
+        dynamics_mod : nn.Module
+            Latent dynamics module providing ``mean_fn`` and ``log_Q``.
+        initial_c_pdf : nn.Module
+            Initial latent distribution exposing ``m_0`` and ``log_Q_0``.
+        """
         super().__init__()
 
         self.dynamics_mod = dynamics_mod
@@ -360,6 +718,34 @@ class NonlinearFilter(nn.Module):
         p_mask: float = 0.0,
         get_P_s: bool = False,
     ):
+        """
+        Perform causal filtering given encoder canonical statistics.
+
+        Parameters
+        ----------
+        k_y : torch.Tensor
+            Forward linear statistics with shape ``[batch, time, latents]``.
+        K_y : torch.Tensor
+            Forward precision factors shaped ``[batch, time, latents, rank]``.
+        k_b : torch.Tensor
+            Backward linear statistics with the same shape as ``k_y``.
+        K_b : torch.Tensor
+            Backward precision factors shaped like ``K_y``.
+        n_samples : int
+            Number of latent samples to draw.
+        get_kl : bool, optional
+            If True, compute KL divergence terms, by default False.
+        p_mask : float, optional
+            Unused dropout probability for API compatibility, by default 0.0.
+        get_P_s : bool, optional
+            If True, accumulate smoothed covariance estimates.
+
+        Returns
+        -------
+        tuple[torch.Tensor, dict[str, torch.Tensor]]
+            Smoothed latent samples and statistics including KL terms,
+            posterior means, and optional covariances.
+        """
         n_trials, n_time_bins, n_latents, rank_y = K_y.shape
 
         kl = []
@@ -467,7 +853,24 @@ class NonlinearFilter(nn.Module):
 
 
 class NonlinearFilterWithInput(nn.Module):
+    """
+    Causal nonlinear filter that additionally conditions on external inputs.
+
+    Inputs are mapped to latent space via ``input_latent_fn`` before combining
+    with encoder statistics during filtering.
+    """
+
     def __init__(self, input_latent_fn, dynamics_mod, initial_c_pdf):
+        """
+        Parameters
+        ----------
+        input_latent_fn : Callable
+            Function mapping inputs to latent contributions.
+        dynamics_mod : nn.Module
+            Latent dynamics module providing ``mean_fn`` and ``log_Q``.
+        initial_c_pdf : nn.Module
+            Initial latent distribution exposing ``m_0`` and ``log_Q_0``.
+        """
         super().__init__()
 
         self.dynamics_mod = dynamics_mod
@@ -485,6 +888,33 @@ class NonlinearFilterWithInput(nn.Module):
         get_kl: bool = False,
         p_mask: float = 0.0,
     ):
+        """
+        Perform causal filtering with encoder statistics and inputs.
+
+        Parameters
+        ----------
+        u : torch.Tensor
+            Input tensor shaped ``[batch, time, input_dim]``.
+        k_y : torch.Tensor
+            Forward linear statistics ``[batch, time, latents]``.
+        K_y : torch.Tensor
+            Forward precision factors ``[batch, time, latents, rank]``.
+        k_b : torch.Tensor
+            Backward linear statistics.
+        K_b : torch.Tensor
+            Backward precision factors.
+        n_samples : int
+            Number of latent samples to draw.
+        get_kl : bool, optional
+            If True, compute KL divergence terms, by default False.
+        p_mask : float, optional
+            Unused dropout probability for compatibility, by default 0.0.
+
+        Returns
+        -------
+        tuple[torch.Tensor, dict[str, torch.Tensor]]
+            Smoothed latent samples and statistics dictionary.
+        """
         n_trials, n_time_bins, n_latents, rank_y = K_y.shape
 
         kl = []
@@ -585,6 +1015,22 @@ class NonlinearFilterWithInput(nn.Module):
 
 
 def predict_step_t(m_theta_z_tm1, Q_diag):
+    """
+    Propagate the smoothing distribution forward one step.
+
+    Parameters
+    ----------
+    m_theta_z_tm1 : torch.Tensor
+        Dynamics samples from the previous time step with shape
+        ``[n_samples, batch, latents]`` or ``[n_samples, latents]``.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor]
+        Predictive mean ``m_p`` and covariance ``P_p`` for the next step.
+    """
     S = m_theta_z_tm1.shape[-1]
     sqrt_S_inv = math.sqrt(1 / S)
 
@@ -596,6 +1042,39 @@ def predict_step_t(m_theta_z_tm1, Q_diag):
 
 
 def alt_kl_step_t(m_s, m_f, m_p, a, A, B, Psi_f, Psi_s, Psi_p, M_c_p, Q_diag):
+    """
+    Compute the alternative KL objective at time ``t`` used for diagnostics.
+
+    Parameters
+    ----------
+    m_s : torch.Tensor
+        Smoothed posterior means.
+    m_f : torch.Tensor
+        Filtered posterior means.
+    m_p : torch.Tensor
+        Predictive means.
+    a : torch.Tensor
+        Linear term of the auxiliary distribution.
+    A : torch.Tensor
+        Forward canonical precision factors.
+    B : torch.Tensor
+        Backward canonical precision factors.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision matrix.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of the smoothed precision matrix.
+    Psi_p : torch.Tensor
+        Inverse Cholesky of the predictive precision matrix.
+    M_c_p : torch.Tensor
+        Predictive covariance factors.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+
+    Returns
+    -------
+    torch.Tensor
+        Alternative KL value per batch item.
+    """
     P_sA = fast_bmm_P_s(Psi_f, Psi_s, B, A, M_c_p, Q_diag, A)
     P_pA = fast_bmm_P_p(M_c_p, Q_diag, A)
 
@@ -629,6 +1108,35 @@ def alt_kl_step_t(m_s, m_f, m_p, a, A, B, Psi_f, Psi_s, Psi_p, M_c_p, Q_diag):
 
 
 def alt_kl_step_0(m_s, m_f, m_0, a, A, B, Psi_f, Psi_s, Q_0_diag):
+    """
+    Compute the alternative KL objective for the initial time step.
+
+    Parameters
+    ----------
+    m_s : torch.Tensor
+        Smoothed posterior means at time zero.
+    m_f : torch.Tensor
+        Filtered posterior means at time zero.
+    m_0 : torch.Tensor
+        Prior mean of the initial state.
+    a : torch.Tensor
+        Linear term of the auxiliary distribution.
+    A : torch.Tensor
+        Forward canonical precision factors.
+    B : torch.Tensor
+        Backward canonical precision factors.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision matrix.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of the smoothed precision matrix.
+    Q_0_diag : torch.Tensor
+        Diagonal entries of the initial covariance.
+
+    Returns
+    -------
+    torch.Tensor
+        Alternative KL value per batch item.
+    """
     P_sA = fast_bmm_P_s_0(Psi_f, Psi_s, B, A, Q_0_diag, A)
     # P_pA = A * Q_0_diag[:, None]
     P_pA = torch.diag(Q_0_diag) @ A
@@ -664,6 +1172,25 @@ def alt_kl_step_0(m_s, m_f, m_0, a, A, B, Psi_f, Psi_s, Q_0_diag):
 
 # @torch.jit.script
 def fast_J_p_bqp(M_p_c, Q_inv_diag, Psi_p, v):
+    """
+    Evaluate ``v^T J_p v`` using low-rank structures.
+
+    Parameters
+    ----------
+    M_p_c : torch.Tensor
+        Predictive covariance factors shaped ``[batch, latents, rank]``.
+    Q_inv_diag : torch.Tensor
+        Inverse process noise diagonal entries.
+    Psi_p : torch.Tensor
+        Inverse Cholesky of the predictive precision matrix.
+    v : torch.Tensor
+        Vector to evaluate the quadratic form on.
+
+    Returns
+    -------
+    torch.Tensor
+        Quadratic form values per batch element.
+    """
     qp_1 = bip(Q_inv_diag[None, :] * v, v)
 
     Q_inv_M_p = Q_inv_diag[None, :, None] * M_p_c
@@ -675,6 +1202,33 @@ def fast_J_p_bqp(M_p_c, Q_inv_diag, Psi_p, v):
 
 
 def fast_tr_J_s_p_P_s(M_f_p_c, M_s_p_c, A, B, Psi_f, Psi_s_p, Psi_s, Q_diag):
+    """
+    Compute ``tr(J_s^+ P_s)`` appearing in the causal KL expression.
+
+    Parameters
+    ----------
+    M_f_p_c : torch.Tensor
+        Filtered covariance factors.
+    M_s_p_c : torch.Tensor
+        Smoothed covariance factors.
+    A : torch.Tensor
+        Forward canonical precision factors.
+    B : torch.Tensor
+        Backward canonical precision factors.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of filtered precision.
+    Psi_s_p : torch.Tensor
+        Inverse Cholesky of predictive smoothed precision.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of smoothed precision.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+
+    Returns
+    -------
+    torch.Tensor
+        Trace values per batch element.
+    """
     Q_inv_diag = 1 / Q_diag
     L = Q_inv_diag.shape[-1]
     Q_inv_sqrt_diag = torch.sqrt(Q_inv_diag)
@@ -709,6 +1263,25 @@ def fast_tr_J_s_p_P_s(M_f_p_c, M_s_p_c, A, B, Psi_f, Psi_s_p, Psi_s, Q_diag):
 
 
 def log_det_kl_t(Psi_s_p, Psi_f, Psi_s, Psi_f_p):
+    """
+    Compute log-determinant contributions for the causal KL term.
+
+    Parameters
+    ----------
+    Psi_s_p : torch.Tensor
+        Inverse Cholesky of the predictive smoothed precision.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of the smoothed precision.
+    Psi_f_p : torch.Tensor
+        Inverse Cholesky of the predictive filtered precision.
+
+    Returns
+    -------
+    torch.Tensor
+        Log-determinant contribution per batch element.
+    """
     term_1 = -2 * torch.sum(
         torch.log(torch.diagonal(Psi_s_p, dim1=-2, dim2=-1) + 1e-8), dim=-1
     )
@@ -730,6 +1303,39 @@ def log_det_kl_t(Psi_s_p, Psi_f, Psi_s, Psi_f_p):
 def low_rank_kl_step_t(
     m_s, m_s_p, M_f_p_c, M_s_p_c, A, B, Psi_f_p, Psi_f, Psi_s_p, Psi_s, Q_diag
 ):
+    """
+    Compute the KL divergence at time ``t`` for the causal smoother.
+
+    Parameters
+    ----------
+    m_s : torch.Tensor
+        Smoothed posterior means.
+    m_s_p : torch.Tensor
+        Predictive smoothed means.
+    M_f_p_c : torch.Tensor
+        Filtered covariance factors.
+    M_s_p_c : torch.Tensor
+        Predictive smoothed covariance factors.
+    A : torch.Tensor
+        Forward canonical precision factors.
+    B : torch.Tensor
+        Backward canonical precision factors.
+    Psi_f_p : torch.Tensor
+        Inverse Cholesky of the predictive filtered precision.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision.
+    Psi_s_p : torch.Tensor
+        Inverse Cholesky of the predictive smoothed precision.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of the smoothed precision.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+
+    Returns
+    -------
+    torch.Tensor
+        KL divergence values per batch element.
+    """
     Q_inv_diag = 1 / Q_diag
     L = m_s.shape[-1]
 
@@ -742,6 +1348,33 @@ def low_rank_kl_step_t(
 
 # @torch.jit.script
 def low_rank_kl_step_0(m_s, m_0, Q_0_diag, Q_diag, A, B, Psi_f, Psi_s):
+    """
+    Compute the KL divergence at the initial time step for the causal smoother.
+
+    Parameters
+    ----------
+    m_s : torch.Tensor
+        Smoothed posterior means at time zero.
+    m_0 : torch.Tensor
+        Prior mean of the initial state.
+    Q_0_diag : torch.Tensor
+        Initial covariance diagonal entries.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+    A : torch.Tensor
+        Forward canonical precision factors.
+    B : torch.Tensor
+        Backward canonical precision factors.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision matrix.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of the smoothed precision matrix.
+
+    Returns
+    -------
+    torch.Tensor
+        KL divergence value per batch element.
+    """
     L = m_s.shape[-1]
     delta_m = m_s - m_0
     Q_0_inv_diag = 1 / Q_0_diag
@@ -773,6 +1406,23 @@ def low_rank_kl_step_0(m_s, m_0, Q_0_diag, Q_diag, A, B, Psi_f, Psi_s):
 
 # @torch.jit.script
 def fast_bmv_P_p(M_c_p, Q_diag, v):
+    """
+    Multiply a vector by the predictive covariance ``P_p``.
+
+    Parameters
+    ----------
+    M_c_p : torch.Tensor
+        Predictive covariance factors shaped ``[batch, latents, rank]``.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+    v : torch.Tensor
+        Vector to multiply, matching the latents dimension.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_p v``.
+    """
     u_1 = bmv(M_c_p, bmv(M_c_p.mT, v))
     u_2 = Q_diag * v
     u = u_1 + u_2
@@ -781,6 +1431,27 @@ def fast_bmv_P_p(M_c_p, Q_diag, v):
 
 # @torch.jit.script
 def fast_bmv_P_f(K, Psi_f, M_c_p, Q_diag, v):
+    """
+    Multiply a vector by the filtered covariance ``P_f``.
+
+    Parameters
+    ----------
+    K : torch.Tensor
+        Canonical precision factors shaped ``[batch, latents, rank]``.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision matrix.
+    M_c_p : torch.Tensor
+        Predictive covariance factors.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+    v : torch.Tensor
+        Vector to multiply, matching the latents dimension.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_f v``.
+    """
     u_1 = fast_bmv_P_p(M_c_p, Q_diag, v)
 
     triple_bmv = bmv(K, bmv(Psi_f, bmv(Psi_f.mT, bmv(K.mT, u_1))))
@@ -791,6 +1462,25 @@ def fast_bmv_P_f(K, Psi_f, M_c_p, Q_diag, v):
 
 # @torch.jit.script
 def fast_bmv_P_p_inv(Q_diag, M_c_p, Psi_p, v):
+    """
+    Multiply a vector by the predictive precision ``J_p``.
+
+    Parameters
+    ----------
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+    M_c_p : torch.Tensor
+        Predictive covariance factors.
+    Psi_p : torch.Tensor
+        Inverse Cholesky of the predictive precision matrix.
+    v : torch.Tensor
+        Vector to multiply, matching the latents dimension.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``J_p v``.
+    """
     Q_inv_diag = 1 / Q_diag
 
     u_1 = Q_inv_diag * v
@@ -801,6 +1491,25 @@ def fast_bmv_P_p_inv(Q_diag, M_c_p, Psi_p, v):
 
 # @torch.jit.script
 def fast_P_f_diagonal(K, Psi_f, M_c_p, Q_diag):
+    """
+    Extract the diagonal of the filtered covariance efficiently.
+
+    Parameters
+    ----------
+    K : torch.Tensor
+        Canonical precision factors.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision matrix.
+    M_c_p : torch.Tensor
+        Predictive covariance factors.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+
+    Returns
+    -------
+    torch.Tensor
+        Diagonal entries of ``P_f``.
+    """
     L = K.shape[-2]
     e_basis = torch.eye(L, device=K.device).view(L, L)
     p = torch.stack(
@@ -812,6 +1521,25 @@ def fast_P_f_diagonal(K, Psi_f, M_c_p, Q_diag):
 
 # @torch.jit.script
 def fast_bmv_P_f_0(K, Psi_f, P_p_diag, v):
+    """
+    Multiply a vector by the filtered covariance at the initial step.
+
+    Parameters
+    ----------
+    K : torch.Tensor
+        Canonical precision factors.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision matrix.
+    P_p_diag : torch.Tensor
+        Predictive covariance diagonal entries.
+    v : torch.Tensor
+        Vector to multiply, matching the latents dimension.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_f v`` at time zero.
+    """
     u_1 = P_p_diag * v
 
     triple_bmv = bmv(K, bmv(Psi_f, bmv(Psi_f.mT, bmv(K.mT, u_1))))
@@ -822,6 +1550,23 @@ def fast_bmv_P_f_0(K, Psi_f, P_p_diag, v):
 
 # @torch.jit.script
 def fast_P_f_0_diagonal(K, Psi_f, P_p_diag):
+    """
+    Extract the diagonal of the filtered covariance at time zero.
+
+    Parameters
+    ----------
+    K : torch.Tensor
+        Canonical precision factors.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision matrix.
+    P_p_diag : torch.Tensor
+        Predictive covariance diagonal entries.
+
+    Returns
+    -------
+    torch.Tensor
+        Diagonal entries of ``P_f`` at time zero.
+    """
     L = K.shape[-2]
     e_basis = torch.eye(L, device=K.device).view(L, L)
     p = torch.stack(
@@ -833,6 +1578,23 @@ def fast_P_f_0_diagonal(K, Psi_f, P_p_diag):
 
 # @torch.jit.script
 def fast_bmm_P_p(M_c_p, Q_diag, V):
+    """
+    Multiply a matrix by the predictive covariance ``P_p``.
+
+    Parameters
+    ----------
+    M_c_p : torch.Tensor
+        Predictive covariance factors.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+    V : torch.Tensor
+        Matrix to multiply with shape ``[batch, latents, rank]``.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_p V``.
+    """
     U_1 = M_c_p @ (M_c_p.mT @ V)
     U_2 = Q_diag[None, :, None] * V
     U = U_1 + U_2
@@ -841,6 +1603,25 @@ def fast_bmm_P_p(M_c_p, Q_diag, V):
 
 # @torch.jit.script
 def fast_bmm_P_f_0(K_y, Psi_f, Q_0_diag, V):
+    """
+    Multiply a matrix by the filtered covariance at the initial step.
+
+    Parameters
+    ----------
+    K_y : torch.Tensor
+        Canonical precision factors.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision matrix.
+    Q_0_diag : torch.Tensor
+        Initial covariance diagonal entries.
+    V : torch.Tensor
+        Matrix to multiply.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_f V`` at time zero.
+    """
     U_1 = Q_0_diag[None, :, None] * V
 
     triple_bmm = K_y @ (Psi_f @ (Psi_f.mT @ (K_y.mT @ U_1)))
@@ -851,6 +1632,27 @@ def fast_bmm_P_f_0(K_y, Psi_f, Q_0_diag, V):
 
 # @torch.jit.script
 def fast_bmm_P_f(K_y, Psi_f, M_c_p, Q_diag, V):
+    """
+    Multiply a matrix by the filtered covariance ``P_f``.
+
+    Parameters
+    ----------
+    K_y : torch.Tensor
+        Forward canonical precision factors.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of the filtered precision matrix.
+    M_c_p : torch.Tensor
+        Predictive covariance factors.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+    V : torch.Tensor
+        Matrix to multiply.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_f V``.
+    """
     U_1 = fast_bmm_P_p(M_c_p, Q_diag, V)
 
     W = K_y @ (Psi_f @ (Psi_f.mT @ (K_y.mT @ U_1)))
@@ -860,6 +1662,31 @@ def fast_bmm_P_f(K_y, Psi_f, M_c_p, Q_diag, V):
 
 
 def fast_bmv_P_s(Psi_f, Psi_s, K_b, K_y, M_c_p, Q_diag, v):
+    """
+    Multiply a vector by the smoothed covariance ``P_s``.
+
+    Parameters
+    ----------
+    Psi_f : torch.Tensor
+        Inverse Cholesky of filtered precision.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of smoothed precision.
+    K_b : torch.Tensor
+        Backward canonical precision factors.
+    K_y : torch.Tensor
+        Forward canonical precision factors.
+    M_c_p : torch.Tensor
+        Predictive covariance factors.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+    v : torch.Tensor
+        Vector to multiply.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_s v``.
+    """
     u_1 = fast_bmv_P_f(K_y, Psi_f, M_c_p, Q_diag, v)
 
     w = K_b @ (Psi_s @ (Psi_s.mT @ (K_b.mT @ u_1.unsqueeze(-1))))
@@ -869,6 +1696,31 @@ def fast_bmv_P_s(Psi_f, Psi_s, K_b, K_y, M_c_p, Q_diag, v):
 
 
 def fast_bmm_P_s(Psi_f, Psi_s, K_b, K_y, M_c_p, Q_diag, V):
+    """
+    Multiply a matrix by the smoothed covariance ``P_s``.
+
+    Parameters
+    ----------
+    Psi_f : torch.Tensor
+        Inverse Cholesky of filtered precision.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of smoothed precision.
+    K_b : torch.Tensor
+        Backward canonical precision factors.
+    K_y : torch.Tensor
+        Forward canonical precision factors.
+    M_c_p : torch.Tensor
+        Predictive covariance factors.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+    V : torch.Tensor
+        Matrix to multiply.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_s V``.
+    """
     U_1 = fast_bmm_P_f(K_y, Psi_f, M_c_p, Q_diag, V)
 
     W = K_b @ (Psi_s @ (Psi_s.mT @ (K_b.mT @ U_1)))
@@ -878,6 +1730,29 @@ def fast_bmm_P_s(Psi_f, Psi_s, K_b, K_y, M_c_p, Q_diag, V):
 
 
 def fast_bmv_P_s_0(Psi_f, Psi_s, K_b, K_y, Q_0_diag, v):
+    """
+    Multiply a vector by the smoothed covariance at the initial step.
+
+    Parameters
+    ----------
+    Psi_f : torch.Tensor
+        Inverse Cholesky of filtered precision.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of smoothed precision.
+    K_b : torch.Tensor
+        Backward canonical precision factors.
+    K_y : torch.Tensor
+        Forward canonical precision factors.
+    Q_0_diag : torch.Tensor
+        Initial covariance diagonal entries.
+    v : torch.Tensor
+        Vector to multiply.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_s v`` at time zero.
+    """
     u_1 = fast_bmv_P_f_0(K_y, Psi_f, Q_0_diag, v)
 
     w = K_b @ (Psi_s @ (Psi_s.mT @ (K_b.mT @ u_1.unsqueeze(-1))))
@@ -887,6 +1762,29 @@ def fast_bmv_P_s_0(Psi_f, Psi_s, K_b, K_y, Q_0_diag, v):
 
 
 def fast_bmm_P_s_0(Psi_f, Psi_s, K_b, K_y, Q_0_diag, V):
+    """
+    Multiply a matrix by the smoothed covariance at the initial step.
+
+    Parameters
+    ----------
+    Psi_f : torch.Tensor
+        Inverse Cholesky of filtered precision.
+    Psi_s : torch.Tensor
+        Inverse Cholesky of smoothed precision.
+    K_b : torch.Tensor
+        Backward canonical precision factors.
+    K_y : torch.Tensor
+        Forward canonical precision factors.
+    Q_0_diag : torch.Tensor
+        Initial covariance diagonal entries.
+    V : torch.Tensor
+        Matrix to multiply.
+
+    Returns
+    -------
+    torch.Tensor
+        Product ``P_s V`` at time zero.
+    """
     U_1 = fast_bmm_P_f_0(K_y, Psi_f, Q_0_diag, V)
 
     W = K_b @ (Psi_s @ (Psi_s.mT @ (K_b.mT @ U_1)))
@@ -898,6 +1796,34 @@ def fast_bmm_P_s_0(Psi_f, Psi_s, K_b, K_y, Q_0_diag, V):
 def fast_update_filtering_to_smoothing_stats_0(
     z_f, h_f, m_f, Psi_f, k_b, K_b, K_y, Q_0_diag
 ):
+    """
+    Convert filtering statistics to smoothing statistics at time zero.
+
+    Parameters
+    ----------
+    z_f : torch.Tensor
+        Filtered latent samples.
+    h_f : torch.Tensor
+        Filtered natural parameters.
+    m_f : torch.Tensor
+        Filtered posterior means.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of filtered precision.
+    k_b : torch.Tensor
+        Backward linear statistics.
+    K_b : torch.Tensor
+        Backward precision factors.
+    K_y : torch.Tensor
+        Forward precision factors.
+    Q_0_diag : torch.Tensor
+        Initial covariance diagonal entries.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        Smoothed posterior mean ``m_s``, smoothed samples ``z_s``, and inverse
+        Cholesky ``Psi_s`` of the smoothed precision.
+    """
     n_trials, n_latents, rank = K_b.shape
     I_r = torch.eye(rank, device=z_f.device)
     w_s = torch.randn((n_trials, rank), device=z_f.device)
@@ -924,6 +1850,36 @@ def fast_update_filtering_to_smoothing_stats_0(
 def fast_update_filtering_to_smoothing_stats_t(
     z_f, h_f, m_f, Psi_f, M_c_f_p, k_b, K_b, K_y, Q_diag
 ):
+    """
+    Convert filtering statistics to smoothing statistics for ``t > 0``.
+
+    Parameters
+    ----------
+    z_f : torch.Tensor
+        Filtered latent samples.
+    h_f : torch.Tensor
+        Filtered natural parameters.
+    m_f : torch.Tensor
+        Filtered posterior means.
+    Psi_f : torch.Tensor
+        Inverse Cholesky of filtered precision.
+    M_c_f_p : torch.Tensor
+        Predictive covariance factors from the filter.
+    k_b : torch.Tensor
+        Backward linear statistics.
+    K_b : torch.Tensor
+        Backward precision factors.
+    K_y : torch.Tensor
+        Forward precision factors.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        Smoothed mean ``m_s``, smoothed samples ``z_s``, and inverse Cholesky
+        ``Psi_s``.
+    """
     n_trials, n_latents, rank = K_b.shape
     I_r = torch.eye(rank, device=z_f.device)
     w_s = torch.randn((n_trials, rank), device=z_f.device)
@@ -949,6 +1905,32 @@ def fast_update_filtering_to_smoothing_stats_t(
 
 # @torch.jit.script
 def fast_update_step(z_p_c, h_p, k, K, w_f, M_c_p, Q_diag):
+    """
+    Perform the measurement update for the causal low-rank filter.
+
+    Parameters
+    ----------
+    z_p_c : torch.Tensor
+        Centered predictive samples with shape ``[n_samples, batch, latents]``.
+    h_p : torch.Tensor
+        Predictive natural parameters.
+    k : torch.Tensor
+        Observation natural parameters at time ``t``.
+    K : torch.Tensor
+        Observation precision factors at time ``t``.
+    w_f : torch.Tensor
+        Standard normal noise used to produce filtered samples.
+    M_c_p : torch.Tensor
+        Predictive covariance factors.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        Posterior mean ``m``, sampled latent ``z``, inverse Cholesky ``Psi``,
+        and updated natural parameters ``h``.
+    """
     n_trials, n_latents, rank = K.shape
     Q_diag_sqrt = torch.sqrt(Q_diag)
     I_r = torch.eye(rank, device=z_p_c.device)
@@ -974,6 +1956,24 @@ def fast_update_step(z_p_c, h_p, k, K, w_f, M_c_p, Q_diag):
 
 # @torch.jit.script
 def fast_predict_step(m_theta_z_tm1, Q_diag):
+    """
+    Propagate the predictive distribution one step ahead.
+
+    Parameters
+    ----------
+    m_theta_z_tm1 : torch.Tensor
+        Dynamics samples from the previous time step with shape
+        ``[batch, latents, S]``.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        Centered predictive samples ``z_p_c``, predictive mean ``m_p``,
+        predictive natural parameters ``h_p``, covariance factors ``M_c``, and
+        inverse Cholesky ``Psi_p``.
+    """
     n_trials, n_latents, S = m_theta_z_tm1.shape
 
     sqrt_S_inv = math.sqrt(1 / S)
@@ -998,6 +1998,29 @@ def fast_predict_step(m_theta_z_tm1, Q_diag):
 
 # @torch.jit.script
 def fast_filter_step_t(m_theta_z_tm1, k, K, Q_diag, t_mask):
+    """
+    Execute a causal filtering step for ``t > 0``.
+
+    Parameters
+    ----------
+    m_theta_z_tm1 : torch.Tensor
+        Dynamics samples from the previous time step.
+    k : torch.Tensor
+        Observation natural parameters at time ``t``.
+    K : torch.Tensor
+        Observation precision factors at time ``t``.
+    Q_diag : torch.Tensor
+        Process noise diagonal entries.
+    t_mask : bool
+        When True, skip the measurement update.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        Filtered samples ``z_f``, posterior mean ``m_f``, predictive mean ``m_p``,
+        covariance factors ``M_c_p``, filtered inverse Cholesky ``Psi_f``,
+        predictive inverse Cholesky ``Psi_p``, and filtered natural parameters ``h_f``.
+    """
     n_trials, n_latents, rank = K.shape
     n_samples = m_theta_z_tm1.shape[-1]
     batch_sz = [n_trials]
@@ -1011,6 +2034,30 @@ def fast_filter_step_t(m_theta_z_tm1, k, K, Q_diag, t_mask):
 
 # @torch.jit.script
 def fast_update_step_0(z_p_c, h_p, k, K, w_f, P_p_diag):
+    """
+    Perform the measurement update for the initial time step.
+
+    Parameters
+    ----------
+    z_p_c : torch.Tensor
+        Centered predictive samples at time zero.
+    h_p : torch.Tensor
+        Predictive natural parameters.
+    k : torch.Tensor
+        Observation natural parameters at time zero.
+    K : torch.Tensor
+        Observation precision factors at time zero.
+    w_f : torch.Tensor
+        Standard normal noise used to sample filtered latents.
+    P_p_diag : torch.Tensor
+        Predictive covariance diagonal entries.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        Posterior mean ``m``, sampled latent ``z``, inverse Cholesky ``Psi``,
+        and updated natural parameters ``h``.
+    """
     n_trials, n_latents, rank = K.shape
     I_r = torch.eye(rank)
 
@@ -1043,6 +2090,28 @@ def fast_filter_step_0(
     P_p_diag: torch.Tensor,
     n_samples: int,
 ):
+    """
+    Execute the initial causal filtering step.
+
+    Parameters
+    ----------
+    m_0 : torch.Tensor
+        Initial mean vector.
+    k : torch.Tensor
+        Observation natural parameters at time zero.
+    K : torch.Tensor
+        Observation precision factors at time zero.
+    P_p_diag : torch.Tensor
+        Predictive covariance diagonal entries.
+    n_samples : int
+        Number of latent samples to draw.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        Filtered samples ``z_f``, posterior mean ``m_f``, predictive mean ``m_p``,
+        inverse Cholesky ``Psi_f``, and filtered natural parameters ``h_f``.
+    """
     n_trials, n_latents, rank = K.shape
     batch_sz = [n_trials]
     w_p = torch.randn([n_samples] + batch_sz + [n_latents])
