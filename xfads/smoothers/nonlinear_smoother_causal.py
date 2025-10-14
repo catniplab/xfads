@@ -212,10 +212,10 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         """
         n_trials, n_time_bins, n_neurons = y.shape
 
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
-        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins)))
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device))
+        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=y.device))
         t_mask_y_in = torch.bernoulli(
-            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons))
+            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons), device=y.device)
         )
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
@@ -271,10 +271,10 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         """
         n_trials, n_time_bins, n_neurons = y.shape
 
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
-        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins)))
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device))
+        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=y.device))
         t_mask_y_in = torch.bernoulli(
-            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons))
+            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons), device=y.device)
         )
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
@@ -510,10 +510,10 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         """
         n_trials, n_time_bins, n_neurons = y.shape
 
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
-        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins)))
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device))
+        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=y.device))
         t_mask_y_in = torch.bernoulli(
-            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons))
+            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons), device=y.device)
         )
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
@@ -570,10 +570,10 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         """
         n_trials, n_time_bins, n_neurons = y.shape
 
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
-        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins)))
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device))
+        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=y.device))
         t_mask_y_in = torch.bernoulli(
-            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons))
+            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons), device=y.device)
         )
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
@@ -651,7 +651,7 @@ def get_P_s_t(Q_diag, M_p_c_t, K_a, K_b):
     # TODO: optimize order of operations
     K = torch.cat([K_a, K_b], dim=-1)
     P_p_t = M_p_c_t @ M_p_c_t.mT + torch.diag(Q_diag)
-    I_pl_triple = torch.eye(K.shape[-1]) + K.mT @ P_p_t @ K
+    I_pl_triple = torch.eye(K.shape[-1], device=K.device) + K.mT @ P_p_t @ K
     Psi_t = linalg_utils.triangular_inverse(torch.linalg.cholesky(I_pl_triple)).mT
     P_s_t = P_p_t - P_p_t @ K @ Psi_t @ Psi_t.mT @ K.mT @ P_p_t
 
@@ -679,7 +679,7 @@ def get_P_s_1(Q_0_diag, K_a, K_b):
     # TODO: optimize order of operations
     P_p_t = torch.diag(Q_0_diag)
     K = torch.cat([K_a, K_b], dim=-1)
-    I_pl_triple = torch.eye(K.shape[-1]) + K.mT @ P_p_t @ K
+    I_pl_triple = torch.eye(K.shape[-1], device=K.device) + K.mT @ P_p_t @ K
     Psi_t = linalg_utils.triangular_inverse(torch.linalg.cholesky(I_pl_triple)).mT
     P_s_t = P_p_t - P_p_t @ K @ Psi_t @ Psi_t.mT @ K.mT @ P_p_t
     return P_s_t
@@ -758,8 +758,7 @@ class NonlinearFilter(nn.Module):
         Psi_p = []
         # M_p_f_c = []
 
-        if get_P_s:
-            P_s = []
+        P_s = []
 
         Q_diag = Fn.softplus(self.dynamics_mod.log_Q)
         stats = {}
@@ -2059,7 +2058,7 @@ def fast_update_step_0(z_p_c, h_p, k, K, w_f, P_p_diag):
         and updated natural parameters ``h``.
     """
     n_trials, n_latents, rank = K.shape
-    I_r = torch.eye(rank)
+    I_r = torch.eye(rank, device=K.device)
 
     h = h_p + k
     P_p_K = P_p_diag[None, :, None] * K
@@ -2114,14 +2113,14 @@ def fast_filter_step_0(
     """
     n_trials, n_latents, rank = K.shape
     batch_sz = [n_trials]
-    w_p = torch.randn([n_samples] + batch_sz + [n_latents])
+    w_p = torch.randn([n_samples] + batch_sz + [n_latents], device=K.device)
 
     z_p_c = torch.sqrt(P_p_diag) * w_p
     J_p_diag = 1 / P_p_diag
-    m_p = m_0 * torch.ones(batch_sz + [n_latents])
+    m_p = m_0 * torch.ones(batch_sz + [n_latents], device=m_0.device)
     h_p = J_p_diag * m_p
 
-    w_f = torch.randn([n_samples] + batch_sz + [rank])
+    w_f = torch.randn([n_samples] + batch_sz + [rank], device=K.device)
     m_f, z_f, Psi_f, h_f = fast_update_step_0(z_p_c, h_p, k, K, w_f, P_p_diag)
 
     return z_f, m_f, m_p, Psi_f, h_f

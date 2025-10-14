@@ -174,9 +174,12 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         n_trials, n_time_bins, n_neurons = y.shape
 
         t_mask_y_in = torch.bernoulli(
-            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons))
+            (1 - p_mask_y_in)
+            * torch.ones((n_trials, n_time_bins, n_neurons), device=y.device)
         )
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
+        t_mask_a = torch.bernoulli(
+            (1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device)
+        )
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
 
@@ -353,7 +356,14 @@ class LrSSMcoBPSheldinEncoder(LowRankNonlinearStateSpaceModel):
         n_time_bins_enc : int
             Number of time bins used during encoding.
         """
-        super().__init__()
+        super().__init__(
+            dynamics_mod,
+            likelihood_pdf,
+            initial_c_pdf,
+            backward_encoder,
+            local_encoder,
+            nl_filter,
+        )
 
         self.nl_filter = nl_filter
         self.dynamics_mod = dynamics_mod
@@ -763,8 +773,7 @@ class NonlinearFilter(nn.Module):
         z_f = []
         stats = {}
 
-        if get_P_s:
-            P_s = []
+        P_s = []
 
         Q_diag = Fn.softplus(self.dynamics_mod.log_Q)
         Q_sqrt_diag = torch.sqrt(Q_diag)
@@ -952,7 +961,7 @@ def get_P_s_t(Q_diag, M_p_c_t, K):
     """
     # TODO: optimize order of operations
     P_p_t = M_p_c_t @ M_p_c_t.mT + torch.diag(Q_diag)
-    I_pl_triple = torch.eye(K.shape[-1]) + K.mT @ P_p_t @ K
+    I_pl_triple = torch.eye(K.shape[-1], device=K.device) + K.mT @ P_p_t @ K
     Psi_t = linalg_utils.triangular_inverse(torch.linalg.cholesky(I_pl_triple)).mT
     P_s_t = P_p_t - P_p_t @ K @ Psi_t @ Psi_t.mT @ K.mT @ P_p_t
 
@@ -978,7 +987,7 @@ def get_P_s_1(Q_0_diag, K):
     """
     # TODO: optimize order of operations
     P_p_t = torch.diag(Q_0_diag)
-    I_pl_triple = torch.eye(K.shape[-1]) + K.mT @ P_p_t @ K
+    I_pl_triple = torch.eye(K.shape[-1], device=K.device) + K.mT @ P_p_t @ K
     Psi_t = linalg_utils.triangular_inverse(torch.linalg.cholesky(I_pl_triple)).mT
     P_s_t = P_p_t - P_p_t @ K @ Psi_t @ Psi_t.mT @ K.mT @ P_p_t
     return P_s_t
@@ -1239,7 +1248,7 @@ def fast_P_f_diagonal(K, Psi_f, M_c_p, Q_diag):
         Diagonal entries of ``P_f`` with shape ``[batch, latents]``.
     """
     L = K.shape[-2]
-    e_basis = torch.eye(L).view(L, L)
+    e_basis = torch.eye(L, device=K.device).view(L, L)
     p = torch.stack(
         [fast_bmv_P_f(K, Psi_f, M_c_p, Q_diag, e_basis[i])[..., i] for i in range(L)],
         dim=-1,
@@ -1296,7 +1305,7 @@ def fast_P_f_0_diagonal(K, Psi_f, P_p_diag):
         Diagonal entries of ``P_f`` with shape ``[batch, latents]``.
     """
     L = K.shape[-2]
-    e_basis = torch.eye(L).view(L, L)
+    e_basis = torch.eye(L, device=K.device).view(L, L)
     p = torch.stack(
         [fast_bmv_P_f_0(K, Psi_f, P_p_diag, e_basis[i])[..., i] for i in range(L)],
         dim=-1,
@@ -1336,7 +1345,7 @@ def fast_update_step(z_p_c, h_p, k, K, w_f, M_c_p, Q_diag):
     """
     n_trials, n_latents, rank = K.shape
     Q_diag_sqrt = torch.sqrt(Q_diag)
-    I_r = torch.eye(rank)
+    I_r = torch.eye(rank, device=K.device)
 
     h = h_p + k
 
@@ -1385,7 +1394,7 @@ def fast_predict_step(m_theta_z_tm1, w_p_1, w_p_2, Q_diag):
     S = w_p_1.shape[-1]
     sqrt_S_inv = math.sqrt(1 / S)
     Q_diag_sqrt = torch.sqrt(Q_diag)
-    I_S = torch.eye(S)
+    I_S = torch.eye(S, device=Q_diag.device)
 
     m_p = m_theta_z_tm1.mean(dim=-1)
     M_c = sqrt_S_inv * (m_theta_z_tm1 - m_p.unsqueeze(-1))
@@ -1431,9 +1440,9 @@ def fast_filter_step_t(m_theta_z_tm1, k, K, Q_diag, t_mask):
     n_samples = m_theta_z_tm1.shape[-1]
     batch_sz = [n_trials]
 
-    w_f = torch.randn([n_samples] + batch_sz + [rank])
-    w_p_1 = torch.randn([n_samples] + batch_sz + [n_samples])
-    w_p_2 = torch.randn([n_samples] + batch_sz + [n_latents])
+    w_f = torch.randn([n_samples] + batch_sz + [rank], device=k.device)
+    w_p_1 = torch.randn([n_samples] + batch_sz + [n_samples], device=k.device)
+    w_p_2 = torch.randn([n_samples] + batch_sz + [n_latents], device=k.device)
 
     z_p_c, m_p, h_p, M_c_p, Psi_p = fast_predict_step(
         m_theta_z_tm1, w_p_1, w_p_2, Q_diag
@@ -1444,7 +1453,9 @@ def fast_filter_step_t(m_theta_z_tm1, k, K, Q_diag, t_mask):
     else:
         m_f = m_p
         z_f = m_p + z_p_c
-        Psi_f = torch.ones((n_trials, rank, rank)) * torch.eye(rank)
+        Psi_f = torch.ones((n_trials, rank, rank), device=k.device) * torch.eye(
+            rank, device=k.device
+        )
 
     return z_f, m_f, m_p, M_c_p, Psi_f, Psi_p
 
@@ -1476,7 +1487,7 @@ def fast_update_step_0(z_p_c, h_p, k, K, w_f, P_p_diag):
         ``Psi`` of the filtered precision matrix.
     """
     n_trials, n_latents, rank = K.shape
-    I_r = torch.eye(rank)
+    I_r = torch.eye(rank, device=K.device)
 
     h = h_p + k
     P_p_K = P_p_diag[None, :, None] * K
@@ -1531,14 +1542,14 @@ def fast_filter_step_0(
     """
     n_trials, n_latents, rank = K.shape
     batch_sz = [n_trials]
-    w_p = torch.randn([n_samples] + batch_sz + [n_latents])
+    w_p = torch.randn([n_samples] + batch_sz + [n_latents], device=k.device)
 
     z_p_c = torch.sqrt(P_p_diag) * w_p
     J_p_diag = 1 / P_p_diag
-    m_p = m_0 * torch.ones(batch_sz + [n_latents])
+    m_p = m_0 * torch.ones(batch_sz + [n_latents], device=k.device)
     h_p = J_p_diag * m_p
 
-    w_f = torch.randn([n_samples] + batch_sz + [rank])
+    w_f = torch.randn([n_samples] + batch_sz + [rank], device=k.device)
     m_f, z_f, Psi_f = fast_update_step_0(z_p_c, h_p, k, K, w_f, P_p_diag)
 
     return z_f, m_f, m_p, Psi_f, P_p_diag

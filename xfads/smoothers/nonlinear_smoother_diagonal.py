@@ -65,9 +65,9 @@ class DiagonalNonlinearStateSpaceModel(nn.Module):
         n_trials, n_time_bins, n_neurons = y.shape
 
         t_mask_y_in = torch.bernoulli(
-            (1 - p_mask_y_in) * torch.ones((n_trials, 1, n_neurons))
+            (1 - p_mask_y_in) * torch.ones((n_trials, 1, n_neurons), device=y.device)
         )
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device))
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
 
@@ -93,13 +93,13 @@ class DiagonalNonlinearStateSpaceModel(nn.Module):
     ):
         n_trials, n_time_bins, n_neurons = y.shape
 
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
-        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins)))
+        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device))
+        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=y.device))
         t_mask_apb = torch.bernoulli(
-            (1 - p_mask_apb) * torch.ones((n_trials, n_time_bins))
+            (1 - p_mask_apb) * torch.ones((n_trials, n_time_bins), device=y.device)
         )
         t_mask_y_in = torch.bernoulli(
-            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons))
+            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons), device=y.device)
         )
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)

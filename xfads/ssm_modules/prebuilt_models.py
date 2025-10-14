@@ -7,11 +7,11 @@ from .encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
 from .likelihoods import PoissonLikelihood, BernoulliLikelihood
 
 
-from .smoothers.nonlinear_smoother import (
+from ..smoothers.nonlinear_smoother import (
     NonlinearFilter as NonlinearFilterN,
     LowRankNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModelN,
 )
-from .smoothers.nonlinear_smoother_causal import (
+from ..smoothers.nonlinear_smoother_causal import (
     NonlinearFilter as NonlinearFilterC,
     LowRankNonlinearStateSpaceModel as LowRankNonlinearStateSpaceModelC,
 )
@@ -128,7 +128,7 @@ def create_xfads_poisson_log_link_w_input(
         sys.exit('not a supported "dynamics_type"')
 
     dynamics_mod = DenseGaussianDynamics(
-        dynamics_fn, cfg.n_latents, Q_diag, device=cfg.device
+        dynamics_fn, cfg.n_latents, Q_diag
     )
 
     """initial condition"""
