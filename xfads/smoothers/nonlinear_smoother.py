@@ -239,17 +239,17 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         n_trials, n_time_bins, n_neurons = y.shape
 
         t_mask_a = torch.bernoulli(
-            (1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=y.device)
+            (1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=device)
         )
         t_mask_b = torch.bernoulli(
-            (1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=y.device)
+            (1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=device)
         )
         t_mask_apb = torch.bernoulli(
-            (1 - p_mask_apb) * torch.ones((n_trials, n_time_bins), device=y.device)
+            (1 - p_mask_apb) * torch.ones((n_trials, n_time_bins), device=device)
         )
         t_mask_y_in = torch.bernoulli(
             (1 - p_mask_y_in)
-            * torch.ones((n_trials, n_time_bins, n_neurons), device=y.device)
+            * torch.ones((n_trials, n_time_bins, n_neurons), device=device)
         )
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
@@ -580,15 +580,20 @@ class LrSSMcoBPSallEncoder(LowRankNonlinearStateSpaceModel):
         tuple[torch.Tensor, dict[str, torch.Tensor]]
             Smoothed latent samples and encoder/filter statistics.
         """
+        device = y.device
         n_trials, n_time_bins, n_neurons = y.shape
 
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
-        t_mask_b = torch.bernoulli((1 - p_mask_b) * torch.ones((n_trials, n_time_bins)))
+        t_mask_a = torch.bernoulli(
+            (1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=device)
+        )
+        t_mask_b = torch.bernoulli(
+            (1 - p_mask_b) * torch.ones((n_trials, n_time_bins), device=device)
+        )
         t_mask_apb = torch.bernoulli(
-            (1 - p_mask_apb) * torch.ones((n_trials, n_time_bins))
+            (1 - p_mask_apb) * torch.ones((n_trials, n_time_bins), device=device)
         )
         t_mask_y_in = torch.bernoulli(
-            (1 - p_mask_y_in) * torch.ones((n_trials, 1, n_neurons))
+            (1 - p_mask_y_in) * torch.ones((n_trials, 1, n_neurons), device=device)
         )
 
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
@@ -693,7 +698,9 @@ class LrSSMcoBPSallEncoder(LowRankNonlinearStateSpaceModel):
             Smoothed latents and statistics including expected log rates.
         """
         n_neurons_heldout = self.n_neurons_obs - self.n_neurons_enc
-        y_heldout = torch.zeros((y_enc.shape[0], y_enc.shape[1], n_neurons_heldout))
+        y_heldout = torch.zeros(
+            (y_enc.shape[0], y_enc.shape[1], n_neurons_heldout), device=y_enc.device
+        )
         y_input = torch.cat([y_enc / (1 - p_mask_y_in), y_heldout], dim=-1)
         z_s, stats = self.fast_smooth_1_to_T(y_input, n_samples, get_kl=True)
 

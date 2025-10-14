@@ -236,7 +236,9 @@ def filter_step_t(m_theta_z_tm1, k, K, Q_diag):
     n_samples = m_theta_z_tm1.shape[-1]
     batch_sz = [n_trials]
 
-    w_f = torch.randn([n_samples] + batch_sz + [n_latents])
+    w_f = torch.randn(
+        [n_samples] + batch_sz + [n_latents], device=m_theta_z_tm1.device
+    )
     m_p, P_p = predict_step_t(m_theta_z_tm1.movedim(-1, 0), Q_diag)
     P_p_chol = torch.linalg.cholesky(P_p)
 
@@ -272,12 +274,12 @@ def filter_step_0(
     h_f = h_0 + k
     m_f = P_f * h_f
 
-    w_f = torch.randn([n_samples] + batch_sz + [n_latents])
+    w_f = torch.randn([n_samples] + batch_sz + [n_latents], device=k.device)
     z_f = m_f + torch.sqrt(P_f) * w_f
 
     m_p = m_0 * torch.ones_like(m_f)
-    P_p_chol = torch.diag(torch.sqrt(P_0_diag)) * torch.ones(
-        list(m_f.shape) + [n_latents]
+    P_p_chol = torch.diag(torch.sqrt(P_0_diag)).to(k.device) * torch.ones(
+        list(m_f.shape) + [n_latents], device=k.device
     )
 
     return z_f, m_f, m_p, P_f, P_p_chol

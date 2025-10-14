@@ -118,7 +118,6 @@ def create_xfads_poisson_log_link_w_input(
         dynamics_fn = utils.build_gru_dynamics_function(
             cfg.n_latents,
             cfg.n_hidden_dynamics,
-            device=cfg.device,
             use_layer_norm=cfg.use_layer_norm,
         )
     elif dynamics_type == "diffusion":

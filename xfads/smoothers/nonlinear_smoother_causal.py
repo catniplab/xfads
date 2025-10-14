@@ -1979,8 +1979,8 @@ def fast_predict_step(m_theta_z_tm1, Q_diag):
     Q_diag_sqrt = torch.sqrt(Q_diag)
     I_S = torch.eye(S, device=m_theta_z_tm1.device)
 
-    w_p_1 = torch.randn([S, n_trials, S])
-    w_p_2 = torch.randn([S, n_trials, n_latents])
+    w_p_1 = torch.randn([S, n_trials, S], device=m_theta_z_tm1.device)
+    w_p_2 = torch.randn([S, n_trials, n_latents], device=m_theta_z_tm1.device)
 
     m_p = m_theta_z_tm1.mean(dim=-1)
     M_c = sqrt_S_inv * (m_theta_z_tm1 - m_p.unsqueeze(-1))
@@ -2024,7 +2024,7 @@ def fast_filter_step_t(m_theta_z_tm1, k, K, Q_diag, t_mask):
     n_samples = m_theta_z_tm1.shape[-1]
     batch_sz = [n_trials]
 
-    w_f = torch.randn([n_samples] + batch_sz + [rank])
+    w_f = torch.randn([n_samples] + batch_sz + [rank], device=m_theta_z_tm1.device)
     z_p_c, m_p, h_p, M_c_p, Psi_p = fast_predict_step(m_theta_z_tm1, Q_diag)
     m_f, z_f, Psi_f, h_f = fast_update_step(z_p_c, h_p, k, K, w_f, M_c_p, Q_diag)
 

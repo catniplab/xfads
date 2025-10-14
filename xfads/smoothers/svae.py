@@ -53,9 +53,13 @@ class SVAE(nn.Module):
     ):
         n_trials, n_time_bins, n_neurons = y.shape
 
-        t_mask_a = torch.bernoulli((1 - p_mask_a) * torch.ones((n_trials, n_time_bins)))
+        device = y.device
+        t_mask_a = torch.bernoulli(
+            (1 - p_mask_a) * torch.ones((n_trials, n_time_bins), device=device)
+        )
         t_mask_y_in = torch.bernoulli(
-            (1 - p_mask_y_in) * torch.ones((n_trials, n_time_bins, n_neurons))
+            (1 - p_mask_y_in)
+            * torch.ones((n_trials, n_time_bins, n_neurons), device=device)
         )
         y_in = t_mask_y_in * y / (1 - p_mask_y_in)
 

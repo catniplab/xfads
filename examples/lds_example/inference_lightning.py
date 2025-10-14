@@ -55,19 +55,22 @@ def main():
     y_valid_dataset = torch.utils.data.TensorDataset(
         y_valid,
     )
+    num_workers = cfg.get("num_workers", 0)
+    pin_memory = cfg.get("pin_memory", False)
+
     train_dataloader = torch.utils.data.DataLoader(
         y_train_dataset,
         batch_size=cfg.batch_sz,
         shuffle=True,
-        num_workers=7,
-        pin_memory=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
     )
     valid_dataloader = torch.utils.data.DataLoader(
         y_valid_dataset,
         batch_size=cfg.batch_sz,
         shuffle=False,
-        num_workers=7,
-        pin_memory=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
     )
 
     """likelihood pdf"""
@@ -127,16 +130,20 @@ def main():
         filename="{epoch:0}_{valid_loss}",
     )
 
-    trainer = lightning.Trainer(
+    trainer_kwargs = dict(
         max_epochs=cfg.n_epochs,
         gradient_clip_val=1.0,
         default_root_dir="lightning/",
         callbacks=[ckpt_callback],
         logger=csv_logger,
-        accelerator="gpu",
-        devices=8,
-        strategy="ddp",
+        accelerator=cfg.get("accelerator", "auto"),
+        devices=cfg.get("devices", "auto"),
     )
+    strategy = cfg.get("strategy", None)
+    if strategy not in (None, "auto"):
+        trainer_kwargs["strategy"] = strategy
+
+    trainer = lightning.Trainer(**trainer_kwargs)
 
     trainer.fit(
         model=seq_vae,

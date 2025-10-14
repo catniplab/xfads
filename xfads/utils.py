@@ -206,7 +206,7 @@ class VdpDynamicsModel(nn.Module):
 
 
 class RingAttractorDynamics(nn.Module):
-    def __init__(self, bin_sz=5e-3, d=1.0, w=0.0, device='cpu'):
+    def __init__(self, bin_sz=5e-3, d=1.0, w=0.0):
         super().__init__()
 
         self.d = d
@@ -224,18 +224,24 @@ class RingAttractorDynamics(nn.Module):
 
 
 class SpiralDynamics(nn.Module):
-    def __init__(self, w=math.pi/16, rho=0.98, device='cpu'):
+    def __init__(self, w=math.pi / 16, rho=0.98):
         super().__init__()
-        angle = torch.tensor(w)
-        self.A = rho * torch.tensor([[torch.cos(angle), torch.sin(angle)],
-                          [-torch.sin(angle), torch.cos(angle)]], device=device)
+        angle = torch.as_tensor(w)
+        cos_angle = torch.cos(angle)
+        sin_angle = torch.sin(angle)
+        rotation = torch.stack(
+            [torch.stack([cos_angle, sin_angle]), torch.stack([-sin_angle, cos_angle])]
+        )
+        self.register_buffer("A", rho * rotation)
 
     def forward(self, z_t):
         return bmv(self.A, z_t)
 
 
-def build_gru_dynamics_function(dim_input, dim_hidden, d_type=torch.float32, device='cpu', use_layer_norm=False):
-    gru_dynamics = DynamicsGRU(dim_hidden, dim_input, device, use_layer_norm=use_layer_norm)
+def build_gru_dynamics_function(
+    dim_input, dim_hidden, d_type=torch.float32, use_layer_norm=False
+):
+    gru_dynamics = DynamicsGRU(dim_hidden, dim_input, use_layer_norm=use_layer_norm)
     return gru_dynamics
 
 
@@ -449,6 +455,4 @@ def get_latent_rotation(likelihood_pdf):
 
     U, S, VmT = torch.linalg.svd(C_scaled, full_matrices=False)
     return S.unsqueeze(-1) * VmT, S, U
-
-
 

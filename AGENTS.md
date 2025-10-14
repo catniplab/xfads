@@ -59,5 +59,6 @@ def normalize(x: torch.Tensor) -> torch.Tensor:
 - Core workflow: define `ssm_modules` → assemble model in `smoothers` → train/evaluate via Lightning trainers → run via `examples/*` using Hydra configs.
 
 ## Change Log
-- Record every repository modification in `CHANGELOG.md` with a UTC timestamp in the format `YYYY-MM-DD HH:MM:SSZ - update`.
-- Append new entries to the bottom of the file so the log remains chronological.
+- Record every repository modification in `CHANGELOG.md` grouped by UTC date using a top-level bullet `- YYYY-MM-DD`.
+- List individual updates for that day as indented bullets beneath the date.
+- Append new date groups to the bottom of the file so the log remains chronological.
