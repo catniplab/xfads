@@ -234,3 +234,22 @@ class InitEncoderDKF(nn.Module):
         P_diag = Fn.softplus(m_log_P_diag[..., self.n_latents:])
 
         return m, P_diag
+
+
+class MaskedInputEncoder(nn.Module):
+    def __init__(self, n_inputs, n_latents, n_latents_read, device='cpu'):
+        super(MaskedInputEncoder, self).__init__()
+
+        self.device = device
+        self.n_latents_read = n_latents_read
+        self.n_latents_unread = n_latents - n_latents_read
+        self.linear = nn.Linear(n_inputs, n_latents_read, bias=False, device=device)
+
+    def forward(self, input):
+        read_latent_update = self.linear(input)
+        batch_sz = read_latent_update.shape[:-1]
+        zero_pad = torch.zeros((*batch_sz, self.n_latents_unread), device=self.device)
+        out = torch.cat([read_latent_update, zero_pad], dim=-1)
+
+        return out
+        
