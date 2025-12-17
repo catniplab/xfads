@@ -43,6 +43,16 @@ def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_ty
     """dynamics module"""
     Q_diag = 1. * torch.ones(cfg.n_latents, device=cfg.device)
     dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics, device=cfg.device)
+
+    if dynamics_type is 'nonlinear':
+        dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics, device=cfg.device)
+
+    elif dynamics_type is 'diffusion':
+        dynamics_fn = utils.DynamicsEye()
+
+    else:
+        sys.exit('not a supported "dynamics_type"')
+
     dynamics_mod = DenseGaussianDynamics(dynamics_fn, cfg.n_latents, Q_diag, device=cfg.device)
 
     """initial condition"""
