@@ -5,7 +5,7 @@ import xfads.utils as utils
 import xfads.prob_utils as prob_utils
 from xfads.ssm_modules.dynamics import DenseGaussianDynamics
 from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
-from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn
+from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn, MaskedInputEncoder
 from xfads.ssm_modules.likelihoods import PoissonLikelihood, BernoulliLikelihood
 
 from xfads.decorators import *
@@ -108,9 +108,7 @@ def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_da
                                       device=cfg.device, dropout=cfg.p_local_dropout)
 
     """input encoder"""
-    input_encoder = nn.Sequential(nn.Linear(n_inputs, cfg.n_latents, bias=False, device=cfg.device),
-                                  nn.LayerNorm(cfg.n_latents, bias=False, device=cfg.device)
-                                  )
+    input_encoder = MaskedInputEncoder(n_inputs, cfg.n_latents, cfg.n_latents_read, device=cfg.device)
 
     """sequential vae"""
     if model_type == 'n':
