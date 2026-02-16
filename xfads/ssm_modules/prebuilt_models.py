@@ -31,7 +31,7 @@ from xfads.smoothers.nonlinear_smoother_causal import (
 
 
 @memory_cleanup
-def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_type='n'):
+def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_type='n', dynamics_type='nonlinear'):
     H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
     readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs))
 
