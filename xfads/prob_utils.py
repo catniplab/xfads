@@ -205,10 +205,13 @@ def get_kalman_ho_estimates(H, Gamma_0, n_neurons, n_latents):
     C_hat = obs_matrix[:n_neurons, :]
     B_hat = ctr_matrix[:n_latents, :]  # B_hat ≈ B, not P_inf
 
-    # Estimate A using shifted observability matrices
+    # Estimate A using shift-invariance of the observability matrix.
+    # obs_matrix_top drops the last block row, obs_matrix_bot the first, so
+    # obs_matrix_bot = obs_matrix_top @ A. Solve this least-squares system for A
+    # (solving the reverse yields A^{-1}: reciprocal eigenvalues / reversed rotation).
     obs_matrix_top = obs_matrix[:-n_neurons, :]
     obs_matrix_bot = obs_matrix[n_neurons:, :]
-    A_hat = torch.linalg.pinv(obs_matrix_bot) @ obs_matrix_top
+    A_hat = torch.linalg.lstsq(obs_matrix_top, obs_matrix_bot).solution
 
     # Estimate Q from B: Q_hat = B B^T
     Q_hat = B_hat @ B_hat.T
