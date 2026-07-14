@@ -1,4 +1,3 @@
-import sys
 import torch
 import torch.nn as nn
 import xfads.utils as utils
@@ -121,18 +120,13 @@ def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_da
     input_encoder = MaskedInputEncoder(n_inputs, cfg.n_latents, cfg.n_latents_read, device=cfg.device)
 
     """sequential vae"""
-    if model_type == 'n':
-        print('not supported')
-        sys.exit()
-        # nl_filter = NonlinearFilterN(dynamics_mod, initial_condition_pdf, device=cfg.device)
-        # ssm = LowRankNonlinearStateSpaceModelN(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder,
-        #                                   local_encoder, nl_filter, device=cfg.device)
-    elif model_type == 'c':
+    if model_type == 'c':
         nl_filter = NonlinearFilterCwInput(input_encoder, dynamics_mod, initial_condition_pdf, device=cfg.device)
         ssm = LowRankNonlinearStateSpaceModelCwInput(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder,
                                                      local_encoder, nl_filter, device=cfg.device)
     else:
-        raise NotImplementedError(f"Model {model_type} not implemented")
+        # the with-input factory only supports the causal filter (model_type='c')
+        raise NotImplementedError(f"model_type={model_type!r} not supported by the with-input factory (use 'c')")
 
     return ssm
 
@@ -164,17 +158,12 @@ def create_xfads_bernoulli_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_
     input_encoder = nn.Linear(n_inputs, cfg.n_latents, bias=False, device=cfg.device)
 
     """sequential vae"""
-    if model_type == 'n':
-        print('not supported')
-        sys.exit()
-        # nl_filter = NonlinearFilterN(dynamics_mod, initial_condition_pdf, device=cfg.device)
-        # ssm = LowRankNonlinearStateSpaceModelN(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder,
-        #                                   local_encoder, nl_filter, device=cfg.device)
-    elif model_type == 'c':
+    if model_type == 'c':
         nl_filter = NonlinearFilterCwInput(input_encoder, dynamics_mod, initial_condition_pdf, device=cfg.device)
         ssm = LowRankNonlinearStateSpaceModelCwInput(dynamics_mod, likelihood_pdf, initial_condition_pdf, backward_encoder,
                                                      local_encoder, nl_filter, device=cfg.device)
     else:
-        raise NotImplementedError(f"Model {model_type} not implemented")
+        # the with-input factory only supports the causal filter (model_type='c')
+        raise NotImplementedError(f"model_type={model_type!r} not supported by the with-input factory (use 'c')")
 
     return ssm
