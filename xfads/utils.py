@@ -64,6 +64,17 @@ class DynamicsEye(torch.nn.Module):
         return z
 
 
+class DynamicsLinear(torch.nn.Module):
+    """Linear prior dynamics z_t = A z_{t-1} (no bias). The natural middle rung
+    between fixed identity (DynamicsEye) and a nonlinear GRU flow."""
+    def __init__(self, latent_dim, device='cpu'):
+        super(DynamicsLinear, self).__init__()
+        self.A = nn.Linear(latent_dim, latent_dim, bias=False, device=device)
+
+    def forward(self, z):
+        return self.A(z)
+
+
 class DynamicsQuadSaddle(torch.nn.Module):
     def __init__(self, device):
         super(DynamicsQuadSaddle, self).__init__()
