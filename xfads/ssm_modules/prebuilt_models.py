@@ -44,14 +44,14 @@ def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_ty
     Q_diag = 1. * torch.ones(cfg.n_latents, device=cfg.device)
     dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics, device=cfg.device)
 
-    if dynamics_type is 'nonlinear':
+    if dynamics_type == 'nonlinear':
         dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics, device=cfg.device)
 
-    elif dynamics_type is 'diffusion':
+    elif dynamics_type == 'diffusion':
         dynamics_fn = utils.DynamicsEye()
 
     else:
-        sys.exit('not a supported "dynamics_type"')
+        raise ValueError(f"unsupported dynamics_type: {dynamics_type!r}")
 
     dynamics_mod = DenseGaussianDynamics(dynamics_fn, cfg.n_latents, Q_diag, device=cfg.device)
 
@@ -94,14 +94,14 @@ def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_da
     """dynamics module"""
     Q_diag = 1. * torch.ones(cfg.n_latents, device=cfg.device)
 
-    if dynamics_type is 'nonlinear':
+    if dynamics_type == 'nonlinear':
         dynamics_fn = utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics,
                                                         device=cfg.device, use_layer_norm=cfg.use_layer_norm)
-    elif dynamics_type is 'diffusion':
+    elif dynamics_type == 'diffusion':
         dynamics_fn = utils.DynamicsEye()
 
     else:
-        sys.exit('not a supported "dynamics_type"')
+        raise ValueError(f"unsupported dynamics_type: {dynamics_type!r}")
 
     dynamics_mod = DenseGaussianDynamics(dynamics_fn, cfg.n_latents, Q_diag, device=cfg.device)
 
