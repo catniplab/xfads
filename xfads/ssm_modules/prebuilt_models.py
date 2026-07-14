@@ -1,3 +1,4 @@
+import warnings
 import torch
 import torch.nn as nn
 import xfads.utils as utils
@@ -33,10 +34,22 @@ def build_dynamics_fn(cfg, dynamics_type):
     """Build the prior dynamics module for a given dynamics_type.
 
     Likelihood-agnostic, so every create_xfads_* factory can share one dynamics
-    selection: 'nonlinear' (GRU flow), 'linear' (z_t = A z_{t-1}), or 'diffusion'
-    (fixed identity, z_t = z_{t-1} + noise -- a nonlinear-observation smoother).
+    selection: 'gru' (a nonlinear GRU flow), 'linear' (z_t = A z_{t-1}), or
+    'diffusion' (fixed identity, z_t = z_{t-1} + noise -- a nonlinear-observation
+    smoother).
+
+    'nonlinear' is a deprecated alias for 'gru': it names a category rather than
+    the specific flow it selects, so it is discouraged in favor of the explicit
+    'gru' (leaving room for other nonlinear options, e.g. an MGU).
     """
     if dynamics_type == 'nonlinear':
+        warnings.warn(
+            "dynamics_type='nonlinear' is deprecated: it names a category, not the "
+            "specific flow, and currently maps to the GRU. Use dynamics_type='gru' instead.",
+            DeprecationWarning, stacklevel=2)
+        dynamics_type = 'gru'
+
+    if dynamics_type == 'gru':
         return utils.build_gru_dynamics_function(cfg.n_latents, cfg.n_hidden_dynamics,
                                                  device=cfg.device,
                                                  use_layer_norm=getattr(cfg, 'use_layer_norm', False))
@@ -45,11 +58,12 @@ def build_dynamics_fn(cfg, dynamics_type):
     elif dynamics_type == 'diffusion':
         return utils.DynamicsEye()
     else:
-        raise ValueError(f"unsupported dynamics_type: {dynamics_type!r}")
+        raise ValueError(f"unsupported dynamics_type: {dynamics_type!r} "
+                         f"(use 'gru', 'linear', or 'diffusion')")
 
 
 @memory_cleanup
-def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_type='n', dynamics_type='nonlinear'):
+def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_type='n', dynamics_type='gru'):
     H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
     readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs))
 
@@ -91,7 +105,7 @@ def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_ty
 
 
 @memory_cleanup
-def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_dataloader, model_type='n', dynamics_type='nonlinear'):
+def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_dataloader, model_type='n', dynamics_type='gru'):
     H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
     readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs))
 
@@ -131,7 +145,7 @@ def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_da
     return ssm
 
 
-def create_xfads_bernoulli_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_dataloader, model_type='n', dynamics_type='nonlinear'):
+def create_xfads_bernoulli_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_dataloader, model_type='n', dynamics_type='gru'):
     H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
     readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs, device=cfg.device))
     readout_fn[-1].bias.data = prob_utils.estimate_poisson_rate_bias(train_dataloader, cfg.bin_sz).to(cfg.device)
