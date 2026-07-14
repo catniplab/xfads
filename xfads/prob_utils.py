@@ -126,13 +126,22 @@ def kalman_information_filter(k, K, F, Q_diag, m_0, Q_0_diag):
 
 
 def align_latent_variables(z_1, z_2):
-    # align z_2 onto z_1
+    # Align z_2 onto z_1 by regressing z_1 on z_2. A linear latent model is
+    # identifiable only up to an invertible linear map, so we undo that
+    # ambiguity (rotation, scale, reflection) with a least-squares fit.
+    #
+    # lstsq(z_2, z_1) returns W minimizing || z_2 @ W - z_1 ||, so the aligned
+    # estimate is z_2 @ W. Per time point z_2 is a row vector v, and
+    # v @ W == W^T @ v (as a column vector), hence bmv uses W.mT (= W^T).
+    # Using W directly here would apply the transpose map: harmless for a pure
+    # reflection/scaling (W diagonal, W == W^T) but wrong whenever the fit is a
+    # genuine rotation (off-diagonal W), where it applies the inverse rotation.
 
     B, T, L = z_1.shape
     z_1_reshaped = z_1.reshape(B * T, L)
     z_2_reshaped = z_2.reshape(B * T, L)
     lstsq_sol = torch.linalg.lstsq(z_2_reshaped, z_1_reshaped)
-    z_2_rot = bmv(lstsq_sol.solution, z_2)
+    z_2_rot = bmv(lstsq_sol.solution.mT, z_2)
 
     return lstsq_sol.solution, z_2_rot
 
