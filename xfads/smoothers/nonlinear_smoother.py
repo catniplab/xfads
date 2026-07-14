@@ -349,6 +349,12 @@ class NonlinearFilter(nn.Module):
             z_f.append(z_f_t)
 
         z_f = torch.stack(z_f, dim=2)
+        # m_f: posterior-mean latent state per time step, (n_trials, n_time_bins,
+        # n_latents). It is the *filtered* mean when reached via
+        # fast_filter_1_to_T (local encoder only) and the *smoothed* mean via
+        # fast_smooth_1_to_T (adds the backward encoder, conditioning on the whole
+        # trial). Sample-based, so it is stochastic across calls; n_samples trades
+        # variance for cost. (The 'm_f' name is legacy filter notation.)
         stats['m_f'] = torch.stack(m_f, dim=1)
 
         if get_kl:
@@ -406,6 +412,12 @@ class NonlinearFilterSmallL(nn.Module):
             P_p_chol.append(P_p_chol_t)
 
         z_f = torch.stack(z_f, dim=2)
+        # m_f: posterior-mean latent state per time step, (n_trials, n_time_bins,
+        # n_latents). It is the *filtered* mean when reached via
+        # fast_filter_1_to_T (local encoder only) and the *smoothed* mean via
+        # fast_smooth_1_to_T (adds the backward encoder, conditioning on the whole
+        # trial). Sample-based, so it is stochastic across calls; n_samples trades
+        # variance for cost. (The 'm_f' name is legacy filter notation.)
         stats['m_f'] = torch.stack(m_f, dim=1)
         stats['m_p'] = torch.stack(m_p, dim=1)
         stats['P_f_chol'] = torch.stack(P_f_chol, dim=1)
