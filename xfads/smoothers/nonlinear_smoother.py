@@ -39,6 +39,16 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         loss = loss.sum(dim=-1).mean()
         return loss, z_s, stats
 
+    @torch.no_grad()
+    def smooth(self, y, n_samples: int = 25):
+        """Posterior-mean smoothed latent trajectories.
+
+        Convenience wrapper so users do not have to call the model and reach into
+        the stats dict. Returns m_f of shape (n_trials, n_time_bins, n_latents).
+        """
+        _, _, stats = self(y, n_samples)
+        return stats['m_f']
+
     def fast_filter_1_to_T(self,
                            y,
                            n_samples: int,
