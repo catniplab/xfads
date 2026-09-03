@@ -1,5 +1,6 @@
 import copy
 import math
+import warnings
 import torch
 import einops
 import numpy as np
@@ -64,15 +65,103 @@ class DynamicsEye(torch.nn.Module):
         return z
 
 
+DEFAULT_TAU_DYNAMICS = 10.0  # seconds; expected longest timescale when only bin_sz is known
+
+
+def lam_from_tau(tau, bin_sz):
+    """Per-bin decay factor of a mode with timescale tau (seconds): lam = exp(-bin_sz / tau)."""
+    if tau <= 0:
+        raise ValueError(f"tau must be positive, got {tau}")
+    return math.exp(-bin_sz / tau)
+
+
 class DynamicsLinear(torch.nn.Module):
-    """Linear prior dynamics z_t = A z_{t-1} (no bias). The natural middle rung
-    between fixed identity (DynamicsEye) and a nonlinear GRU flow."""
-    def __init__(self, latent_dim, device='cpu'):
+    """Linear prior dynamics z_t = lam * z_{t-1} + A z_{t-1} with ||lam*I + A||_2 <= rho_max.
+
+    lam in [0, 1] is fixed (a buffer). Give it directly, or give tau (seconds), the
+    expected longest timescale of the system, together with bin_sz: lam = exp(-bin_sz / tau).
+    A starts at zero, so every mode starts at timescale tau and the data speed them up.
+    An explicit tau overrides an explicit lam (with a warning); with only bin_sz known,
+    tau defaults to DEFAULT_TAU_DYNAMICS. Since the spectral radius is at most the
+    spectral norm, the bound keeps the time-invariant system stable while admitting any
+    damped rotation. rho_max=None disables it, which non-normal F (spectral radius < 1
+    but norm > 1) needs; rho_max = lam turns tau into a hard upper bound on timescales.
+
+    With a first-order optimizer and no weight decay this trains identically to a free F
+    initialized at lam*I: the residual form fixes the anchor and the init, not the
+    optimizer path.
+
+    Use cases:
+      1. fit an LDS from data: DynamicsLinear(L, bin_sz=cfg.bin_sz), defaults otherwise.
+      2. F already known (Kalman-Ho, an earlier fit, least squares on inferred latents):
+         DynamicsLinear(L, lam=0.0).set_transition(F), which stores A = F verbatim.
+      3. structured / non-normal F (real Schur form, rotation blocks): subclass, override
+         _unbounded_transition(), run with rho_max=None; stability comes from the structure.
+    """
+    def __init__(self, latent_dim, lam=None, tau=None, bin_sz=None, rho_max=1.0, device='cpu'):
         super(DynamicsLinear, self).__init__()
-        self.A = nn.Linear(latent_dim, latent_dim, bias=False, device=device)
+
+        # precedence: explicit tau > explicit lam > default tau (which needs bin_sz)
+        if tau is not None:
+            if bin_sz is None:
+                raise ValueError("tau needs bin_sz: lam = exp(-bin_sz / tau)")
+            if lam is not None:
+                warnings.warn(f"both lam={lam} and tau={tau} given; tau wins", stacklevel=2)
+            lam = lam_from_tau(tau, bin_sz)
+        elif lam is None:
+            if bin_sz is None:
+                raise ValueError("DynamicsLinear needs bin_sz (for the default tau) or an explicit lam")
+            lam = lam_from_tau(DEFAULT_TAU_DYNAMICS, bin_sz)
+
+        if not 0.0 <= lam <= 1.0:
+            raise ValueError(f"lam must be in [0, 1], got {lam}")
+        if rho_max is not None and rho_max <= 0:
+            raise ValueError(f"rho_max must be positive or None, got {rho_max}")
+
+        self.register_buffer('lam', torch.tensor(float(lam), device=device))
+        self.rho_max = rho_max
+        self.A = nn.Parameter(torch.zeros(latent_dim, latent_dim, device=device))
+
+    def _eye(self):
+        return torch.eye(self.A.shape[0], device=self.A.device, dtype=self.A.dtype)
+
+    def _unbounded_transition(self):
+        # lam*I + A. The single override point for structured subclasses (Schur,
+        # periodic); the bound and forward stay in the base class.
+        return self.lam * self._eye() + self.A
+
+    @property
+    def transition_matrix(self):
+        F = self._unbounded_transition()
+
+        if self.rho_max is None:
+            return F
+
+        # rescale only when ||F||_2 exceeds rho_max (exact norm; L is small)
+        scale = torch.clamp(self.rho_max / torch.linalg.matrix_norm(F, ord=2), max=1.0)
+        return scale * F
 
     def forward(self, z):
-        return self.A(z)
+        return z @ self.transition_matrix.mT
+
+    def set_transition(self, F):
+        """Set A so that the transition equals F, i.e. A = F - lam*I."""
+        tol = 1e-6
+        rho = torch.linalg.eigvals(F).abs().max().item()
+
+        if rho > 1.0 + tol:
+            raise ValueError(f"F is unstable in the time-invariant form: spectral radius {rho:.4f} > 1")
+
+        if self.rho_max is not None:
+            norm = torch.linalg.matrix_norm(F, ord=2).item()
+
+            if norm > self.rho_max + tol:
+                warnings.warn(f"||F||_2 = {norm:.4f} > rho_max = {self.rho_max}; the bound will "
+                              f"rescale F. Pass rho_max=None to keep it intact.", stacklevel=2)
+
+        with torch.no_grad():
+            F = F.to(device=self.A.device, dtype=self.A.dtype)
+            self.A.copy_(F - self.lam * self._eye())
 
 
 class DynamicsQuadSaddle(torch.nn.Module):

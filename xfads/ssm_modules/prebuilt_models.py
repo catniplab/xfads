@@ -34,9 +34,15 @@ def build_dynamics_fn(cfg, dynamics_type):
     """Build the prior dynamics module for a given dynamics_type.
 
     Likelihood-agnostic, so every create_xfads_* factory can share one dynamics
-    selection: 'gru' (a nonlinear GRU flow), 'linear' (z_t = A z_{t-1}), or
-    'diffusion' (fixed identity, z_t = z_{t-1} + noise -- a nonlinear-observation
-    smoother).
+    selection: 'gru' (a nonlinear GRU flow), 'linear', or 'diffusion' (fixed
+    identity, z_t = z_{t-1} + noise -- a nonlinear-observation smoother).
+
+    'linear' is z_t = lam * z_{t-1} + A z_{t-1} with ||lam*I + A||_2 <= rho_max and
+    A zero-initialized (see utils.DynamicsLinear for the use cases). Optional cfg
+    keys: tau_dynamics (seconds; the expected longest timescale, lam = exp(-bin_sz /
+    tau), default 10 s), lam_dynamics (set lam directly; an explicit tau_dynamics
+    overrides it), rho_max_dynamics (spectral-norm bound, default 1.0; null disables
+    it). cfg.bin_sz is needed to resolve tau.
 
     'nonlinear' is a deprecated alias for 'gru': it names a category rather than
     the specific flow it selects, so it is discouraged in favor of the explicit
@@ -54,7 +60,12 @@ def build_dynamics_fn(cfg, dynamics_type):
                                                  device=cfg.device,
                                                  use_layer_norm=getattr(cfg, 'use_layer_norm', False))
     elif dynamics_type == 'linear':
-        return utils.DynamicsLinear(cfg.n_latents, device=cfg.device)
+        return utils.DynamicsLinear(cfg.n_latents,
+                                    lam=getattr(cfg, 'lam_dynamics', None),
+                                    tau=getattr(cfg, 'tau_dynamics', None),
+                                    bin_sz=getattr(cfg, 'bin_sz', None),
+                                    rho_max=getattr(cfg, 'rho_max_dynamics', 1.0),
+                                    device=cfg.device)
     elif dynamics_type == 'diffusion':
         return utils.DynamicsEye()
     else:
