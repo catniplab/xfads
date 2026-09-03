@@ -99,6 +99,22 @@ LSVS was designed with custom configurations in mind so that depending on the pr
 
 ```
 
+## Choosing the prior dynamics
+The `create_xfads_*` factories take a `dynamics_type`:
+- `'gru'` (default): a nonlinear GRU flow, `utils.build_gru_dynamics_function`.
+- `'linear'`: `z_t = lam * z_{t-1} + A z_{t-1}` with `||lam*I + A||_2 <= rho_max`, `utils.DynamicsLinear`.
+- `'diffusion'`: fixed identity, `z_t = z_{t-1} + noise`, `utils.DynamicsEye`.
+
+The linear dynamics start at `A = 0`, i.e. as `lam` times the identity, so with `lam = 1` they start exactly as `'diffusion'` and depart from it during training. Optional config keys (`bin_sz` is needed to resolve `tau`):
+- `tau_dynamics` (seconds, default 10): the expected longest timescale of the system; `lam = exp(-bin_sz / tau_dynamics)`. Every mode starts at this timescale and the data speed them up.
+- `lam_dynamics`: set `lam` in `[0, 1]` directly. An explicit `tau_dynamics` overrides it with a warning.
+- `rho_max_dynamics` (default 1.0): spectral-norm bound on the transition `lam*I + A`. Since the spectral radius is at most the spectral norm, this keeps the time-invariant system stable while admitting any damped rotation. `null` disables it; `rho_max_dynamics` equal to `lam` (`utils.lam_from_tau(tau, bin_sz)`) turns `tau_dynamics` into a hard upper bound on timescales.
+
+Three use cases:
+1. Fit a linear system from data: `dynamics_type='linear'` with the defaults, or directly `utils.DynamicsLinear(n_latents, bin_sz=cfg.bin_sz)`.
+2. Already have a transition matrix `F` (Kalman-Ho from `prob_utils.get_kalman_ho_estimates`, an earlier fit, a least-squares fit to latents from an identity-dynamics run): `utils.DynamicsLinear(n_latents, lam=0.0)` then `.set_transition(F)`, which stores `A = F` verbatim. It raises if the spectral radius of `F` exceeds 1 and warns if `||F||_2 > rho_max`, in which case pass `rho_max=None` to keep `F` intact.
+3. Structured or non-normal linear systems (real Schur form, rotation blocks): subclass `DynamicsLinear`, override `_unbounded_transition()`, and run with `rho_max=None`. These are exactly the systems with spectral radius below 1 but spectral norm above 1, so stability comes from the structure (e.g. the modulus of the Schur diagonal blocks) rather than the norm bound.
+
 
 ## Acknowledgements and references
 The structure of the code and configuration management was heavily inspired by the excellently written `lfads-torch` package at [https://github.com/arsedler9/lfads-torch](https://github.com/arsedler9/lfads-torch) as described in [Sedler and Pandarinath, 2023](https://arxiv.org/abs/2309.01230) \[6\].
