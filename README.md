@@ -14,10 +14,36 @@ Specification of a LowRankNonlinearStateSpaceModel requires:
 
 1. dynamics_mod: a nn.Module with a `mean_fn` attribute that specifies $m_{\theta}(\cdot)$ (e.g. some neural network function) 
 2. initial_c_pdf: a nn.Module that specifies the initial mean, $m_0$, and initial state-noise $Q_0$
-3. likelihood_pdf: a nn.Module that implements a `get_ell(y, z)` method that returns $\log p_{\psi}(y|z)$
+3. likelihood_pdf: a [`Likelihood`](xfads/ssm_modules/likelihoods.py) module that implements a `get_ell(y, z)` method that returns $\log p_{\psi}(y|z)$
 4. local_encoder: a nn.Module whose `forward` function maps time-instantaneous observations, $y_t$, to a natural parameter update, $\alpha_t$
 5. backward_encoder: a nn.Module whose `forward` function maps sequences of local natural parameter updates, $\alpha_{1:T}$, to backward natural parameter updates, $\beta_{1:T}$
 6. nl_filter: a nn.Module whose forward method takes natural parameter representation of observations, $\tilde{\lambda}_{1:T}$, and performs approximate posterior inference for the specified nonlinear dynamical system
+
+To implement a custom observation model, inherit from `Likelihood`, call
+`super().__init__()` in its constructor, and implement `get_ell(y, z)`.
+For observations shaped `(trials, time, neurons)` and latent samples shaped
+`(samples, trials, time, latents)`, return `(samples, trials, time)` log
+likelihoods, summed over neurons and retaining gradients.
+The smoother averages over samples; `get_ell` does not.
+The base class documents the full contract and prevents instantiation of
+subclasses that omit `get_ell`.
+NaN observations contribute zero, and `reduce_neuron_dim=False` returns
+separate terms for each neuron with shape `(samples, trials, time, neurons)`.
+
+Normalization conventions are documented by each likelihood class.
+Every term depending on the latent states or trainable likelihood parameters
+must be retained, including parameter-dependent normalizers.
+Observation-only additive constants may be omitted if explicitly documented;
+omitting them preserves gradients but shifts absolute likelihood and ELBO values.
+The Gaussian and Bernoulli implementations retain all normalization terms.
+Poisson includes an approximate log-factorial term using PyTorch's Stirling
+approximation for counts greater than one.
+Account for these conventions when comparing absolute values across models.
+
+Some specialized smoothers have additional requirements.
+Coordinated dropout (`use_cd=True`) requires per-neuron log likelihoods through
+`get_ell(y, z, reduce_neuron_dim=False)`.
+Some smoothers also access `readout_fn[-1].weight` for readout regularization.
 
 ## Parameter descriptions
 There are several parameters that can be configured to trade off expressivity/speed/generalization properties of the model and inference algorithm that we detail below.  Some are specific to the case of neural data modeled using a Poisson observation model with log-linear readout of the latent state.

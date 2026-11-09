@@ -1,4 +1,6 @@
 import math
+from abc import ABC, abstractmethod
+
 import torch
 import torch.nn as nn
 import xfads.utils as utils
@@ -7,8 +9,84 @@ import torch.nn.functional as Fn
 from xfads.decorators import *
 
 
+class Likelihood(nn.Module, ABC):
+    """Observation likelihood interface consumed by the XFADS smoothers.
+
+    Subclasses implement :meth:`get_ell` and register trainable parameters,
+    buffers, and readout modules through the usual ``nn.Module`` mechanisms.
+    Call ``super().__init__()`` in subclass constructors.
+    Smoothers call ``get_ell`` directly; implementing ``forward`` is not required.
+
+    This interface describes the common likelihood operation only.
+    Some specialized smoothers also require access to ``readout_fn``;
+    those requirements depend on the smoother being used.
+    """
+
+    @abstractmethod
+    def get_ell(self, y: torch.Tensor, z: torch.Tensor,
+                reduce_neuron_dim: bool = True) -> torch.Tensor:
+        """Evaluate observation log likelihoods at the supplied latent states.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observations with shape ``(n_trials, n_time_bins, n_neurons)``.
+            Values must belong to the observation model's support.
+            NaN entries denote missing observations and contribute zero.
+        z : torch.Tensor
+            Latent samples with shape
+            ``(n_samples, n_trials, n_time_bins, n_latents)``.
+            The readout must preserve the leading dimensions and produce
+            ``n_neurons`` observation parameters per latent state.
+            Observations are broadcast over the leading sample dimension.
+            Inputs and module parameters must have compatible devices and
+            dtypes.
+        reduce_neuron_dim : bool, optional
+            Sum over neurons when True (the default).
+            When False, return separate terms for each neuron, as required
+            by coordinated dropout.
+
+        Returns
+        -------
+        torch.Tensor
+            Conditional log likelihoods with shape
+            ``(n_samples, n_trials, n_time_bins)`` when summing over neurons,
+            or ``(n_samples, n_trials, n_time_bins, n_neurons)`` otherwise.
+            Keep sample, trial, and time dimensions intact, including when
+            their size is one.
+            Return log likelihoods, rather than negative log likelihoods.
+            Preserve the autograd graph with respect to latent states and
+            trainable likelihood parameters.
+
+        Notes
+        -----
+        Despite the name, this method evaluates each supplied latent sample;
+        it does not compute an expectation or draw additional samples.
+        Smoothers compute the Monte Carlo expectation by averaging dimension 0.
+        No averaging over trials or summation over time is performed here.
+
+        Normalization convention: retain every term that depends on ``z`` or
+        any trainable likelihood parameter, including parameter-dependent
+        normalizers.
+        Implementations may omit additive terms depending only on ``y`` and
+        fixed constants, but must document all omissions and approximations.
+        Such omissions preserve optimization gradients but shift likelihood
+        and ELBO values; the returned value is then not a normalized log
+        probability or density and may not be comparable across models.
+        Do not assume an absolute likelihood convention from the method name.
+        """
+        raise NotImplementedError
+
+
 @apply_memory_cleanup
-class GaussianLikelihood(nn.Module):
+class GaussianLikelihood(Likelihood):
+    """Diagonal Gaussian log density including all normalization terms.
+
+    Includes the variance-dependent normalizer and the constant normalizer.
+    ``R_diag`` specifies observation variances, not standard deviations.
+    ``reduce_neuron_dim=False`` preserves the final neuron dimension.
+    """
+
     def __init__(self, readout_fn, n_neurons, R_diag, device='cpu', fix_R=False):
         super(GaussianLikelihood, self).__init__()
 
@@ -36,7 +114,17 @@ class GaussianLikelihood(nn.Module):
 
 
 @apply_memory_cleanup
-class PoissonLikelihood(nn.Module):
+class PoissonLikelihood(Likelihood):
+    """Poisson log mass with PyTorch's approximate log-factorial term.
+
+    Includes the observation-only factorial term through
+    ``poisson_nll_loss(full=True)``: zero for counts zero and one, and a
+    Stirling approximation for larger counts.
+    Consequently, values approximate the fully normalized log mass.
+    ``delta`` is the bin duration; the readout produces log rates per unit time.
+    ``reduce_neuron_dim=False`` preserves the final neuron dimension.
+    """
+
     def __init__(self, readout_fn, n_neurons, delta, device='cpu', p_mask=0.0):
         super(PoissonLikelihood, self).__init__()
         self.delta = delta
@@ -65,7 +153,13 @@ class PoissonLikelihood(nn.Module):
             return log_p_y
 
 
-class BernoulliLikelihood(nn.Module):
+class BernoulliLikelihood(Likelihood):
+    """Fully normalized Bernoulli log mass for binary observations.
+
+    The readout produces logits, and no normalization terms are omitted.
+    ``reduce_neuron_dim=False`` preserves the final neuron dimension.
+    """
+
     def __init__(self, readout_fn, n_neurons, device='cpu', p_mask=0.0):
         super(BernoulliLikelihood, self).__init__()
         self.device = device
