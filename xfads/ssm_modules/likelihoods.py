@@ -49,8 +49,9 @@ class PoissonLikelihood(nn.Module):
         # so an overflow there cannot turn into NaN (inf * 0) in the loss or its gradient
         obs = ~y.isnan()
         log_exp = torch.where(obs, math.log(self.delta) + self.readout_fn(z), 0.) # C @ z
-        # -log(y!) is omitted: it is constant in every parameter, so gradients and bits/spike do not
-        # change. full=True would add Stirling's approximation of it, whose backward is NaN w.r.t. y at y = 0.
+        # keep full=False when training: -log(y!) is constant in every parameter, so gradients and
+        # bits/spike do not change; full=True adds Stirling's approximation of it, whose backward is
+        # NaN w.r.t. y (only y) at y = 0
         log_p_y = -torch.nn.functional.poisson_nll_loss(log_exp, torch.where(obs, y, 0.), full=False, reduction='none') * obs
 
         if reduce_neuron_dim:
