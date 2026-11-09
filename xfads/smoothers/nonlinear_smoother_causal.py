@@ -83,7 +83,7 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         k_y = t_mask_a[..., None] * k_y
         K_y = t_mask_a[..., None, None] * K_y
 
-        k_b, K_b = self.backward_encoder(k_y, K_y)
+        k_b, K_b = self.backward_encoder(k_y, K_y, ~y.isnan().all(-1))  # skip bins with no observation
         k_b = t_mask_b[..., None] * k_b
         K_b = t_mask_b[..., None, None] * K_b
 
@@ -114,7 +114,7 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         k_y = t_mask_a[..., None] * k_y
         K_y = t_mask_a[..., None, None] * K_y
 
-        k_b, K_b = self.backward_encoder(k_y, K_y)
+        k_b, K_b = self.backward_encoder(k_y, K_y, ~y.isnan().all(-1))  # skip bins with no observation
         k_b = t_mask_b[..., None] * k_b * 0.0
         K_b = t_mask_b[..., None, None] * K_b * 0.0
 
@@ -207,7 +207,7 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         k_y = t_mask_a[..., None] * k_y
         K_y = t_mask_a[..., None, None] * K_y
 
-        k_b, K_b = self.backward_encoder(k_y, K_y)
+        k_b, K_b = self.backward_encoder(k_y, K_y, ~y.isnan().all(-1))  # skip bins with no observation
         k_b = t_mask_b[..., None] * k_b
         K_b = t_mask_b[..., None, None] * K_b
 
@@ -239,7 +239,7 @@ class LowRankNonlinearStateSpaceModelWithInput(LowRankNonlinearStateSpaceModel):
         k_y = t_mask_a[..., None] * k_y
         K_y = t_mask_a[..., None, None] * K_y
 
-        k_b, K_b = self.backward_encoder(k_y, K_y)
+        k_b, K_b = self.backward_encoder(k_y, K_y, ~y.isnan().all(-1))  # skip bins with no observation
         k_b = t_mask_b[..., None] * k_b * 0.0
         K_b = t_mask_b[..., None, None] * K_b * 0.0
 

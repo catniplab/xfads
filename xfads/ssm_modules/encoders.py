@@ -23,7 +23,9 @@ class LocalEncoderLRMvn(nn.Module):
                                  nn.Linear(hidden_size, (rank + 1) * n_latents_read, device=device)).to(device)
 
     def forward(self, y):
-        h_log_J = self.mlp(y)
+        # missing entries of y are NaN: the MLP sees them as 0, and a bin with nothing observed gives no update
+        obs = ~y.isnan()
+        h_log_J = obs.any(-1, keepdim=True) * self.mlp(torch.where(obs, y, 0.))
         # h = h_log_J[..., :self.n_latents]
         h = h_log_J[..., :self.n_latents_read]
         # L_vec = h_log_J[..., self.n_latents:]
@@ -56,14 +58,27 @@ class BackwardEncoderLRMvn(nn.Module):
 
         self.projection = torch.nn.Linear(hidden_size, (rank_backward + 1) * n_latents, device=device)
 
-    def forward(self, h_y, L_y):
+    def forward(self, h_y, L_y, obs_bin=None):
         L_y_vec = L_y.view(h_y.shape[0], h_y.shape[1], -1)
         nat_y = torch.concat([h_y, L_y_vec], dim=-1)
         nat_y_flip = torch.flip(nat_y, dims=[1])
-        w_flip, _ = self.rnn(nat_y_flip)
+
+        # obs_bin (n_trials, n_time_bins) is False at bins with no observation. The GRU carries
+        # its state through them, without a per-step loop: run it once on the observed bins
+        # packed to the front (order kept), then read back at each bin the state after the last
+        # observed bin read so far. With every bin observed the permutation and gathers are identities.
+        if obs_bin is None:
+            obs_bin = torch.ones(nat_y.shape[:2], dtype=torch.bool, device=nat_y.device)
+        obs_flip = torch.flip(obs_bin, dims=[1])
+        order = torch.argsort((~obs_flip).int(), dim=1, stable=True)
+        w_packed, _ = self.rnn(nat_y_flip.gather(1, order[..., None].expand_as(nat_y_flip)))
+        n_read = obs_flip.cumsum(dim=1)
+        w_flip = w_packed.gather(1, (n_read - 1).clamp(min=0)[..., None].expand(-1, -1, w_packed.shape[-1]))
 
         w = torch.flip(w_flip, dims=[1])
-        h_log_J = self.projection(w)
+        # no observation at or after a bin: no backward update; masked before the shift below,
+        # so the returned update at t is zero when nothing is observed after t
+        h_log_J = torch.flip(n_read > 0, dims=[1])[..., None] * self.projection(w)
 
         h = h_log_J[..., :self.n_latents]
         L_vec = h_log_J[..., self.n_latents:]

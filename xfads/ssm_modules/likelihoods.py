@@ -21,12 +21,18 @@ class GaussianLikelihood(nn.Module):
         else:
             self.log_R = torch.nn.Parameter(utils.softplus_inv(R_diag))
 
-    def get_ell(self, y, z):
-        mean = self.readout_fn(z)
+    def get_ell(self, y, z, reduce_neuron_dim=True):
+        # missing entries (NaN) add no term; their predictions are replaced before any arithmetic,
+        # so an overflow there cannot turn into NaN (inf * 0) in the loss or its gradient
+        obs = ~y.isnan()
+        mean = torch.where(obs, self.readout_fn(z), 0.)
         cov = Fn.softplus(self.log_R)
-        log_prob = -0.5 * ((y - mean)**2 / cov + torch.log(cov) + math.log(2 * math.pi))
-        log_p_y = log_prob.sum(dim=-1)
-        return log_p_y
+        log_prob = -0.5 * ((torch.where(obs, y, 0.) - mean)**2 / cov + torch.log(cov) + math.log(2 * math.pi)) * obs
+
+        if reduce_neuron_dim:
+            return log_prob.sum(dim=-1)
+        else:
+            return log_prob
 
 
 @apply_memory_cleanup
@@ -39,8 +45,11 @@ class PoissonLikelihood(nn.Module):
         self.readout_fn = readout_fn
 
     def get_ell(self, y, z, reduce_neuron_dim=True):
-        log_exp = math.log(self.delta) + self.readout_fn(z) # C @ z
-        log_p_y = -torch.nn.functional.poisson_nll_loss(log_exp, y, full=True, reduction='none')
+        # missing entries (NaN) add no term; their predictions are replaced before any arithmetic,
+        # so an overflow there cannot turn into NaN (inf * 0) in the loss or its gradient
+        obs = ~y.isnan()
+        log_exp = torch.where(obs, math.log(self.delta) + self.readout_fn(z), 0.) # C @ z
+        log_p_y = -torch.nn.functional.poisson_nll_loss(log_exp, torch.where(obs, y, 0.), full=True, reduction='none') * obs
 
         if reduce_neuron_dim:
             return log_p_y.sum(dim=-1)
@@ -56,8 +65,10 @@ class BernoulliLikelihood(nn.Module):
         self.readout_fn = readout_fn
 
     def get_ell(self, y, z, reduce_neuron_dim=True):
+        obs = ~y.isnan()  # missing entries (NaN) add no term
         logits = self.readout_fn(z)
-        log_p_y = -torch.nn.functional.binary_cross_entropy_with_logits(logits, y.expand([logits.shape[0]] + list(y.shape)), reduction='none')
+        y = torch.where(obs, y, 0.).expand([logits.shape[0]] + list(y.shape))
+        log_p_y = -torch.nn.functional.binary_cross_entropy_with_logits(logits, y, reduction='none') * obs
 
         if reduce_neuron_dim:
             return log_p_y.sum(dim=-1)
