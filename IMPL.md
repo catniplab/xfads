@@ -42,3 +42,33 @@
   default outputs.
   An AST comparison against `origin/main` again confirmed unchanged concrete
   likelihood methods, and `git diff --check origin/main` passed.
+
+## 2026-11-09: Optional observation-only normalization
+
+- Memming approved exposing `full=True` on `get_ell` and emphasized the
+  computation saved by skipping normalization work.
+- Updated the describing documentation before changing the calculations.
+  Default full-mode results are preserved.
+  Gaussian drops only the constant half-log-two-pi term in non-full mode,
+  Poisson skips its approximate log-factorial work, and Bernoulli is unchanged.
+  All latent- and trainable-parameter-dependent terms remain present.
+- Implemented the flag on the abstract method and all three concrete classes.
+  Appended it after `reduce_neuron_dim` to preserve existing positional calls.
+  Poisson forwards it to PyTorch; Gaussian branches before adding its constant.
+- All 26 tests passed with the shared environment, including full/non-full
+  reference values, latent/readout/variance gradient equivalence, missing
+  entries and bins, per-neuron reductions, and fixed Gaussian variance.
+  Existing default-mode integration and RNG regression tests also passed.
+  `git diff --check` passed.
+- Exploratory CPU kernel benchmark at the working changes following 54ad19c:
+  `uv run --no-project <shared .venv>/bin/python work/benchmark_normalization.py`.
+  PyTorch 2.14.0, float32, one thread, seed 20261109;
+  log rates sampled from a standard normal with shape `(8, 8, 256, 128)`
+  (samples, trials, time, neurons); counts drawn from Poisson(2) with shape
+  `(8, 256, 128)` and broadcast over samples.
+  Used `torch.utils.benchmark.Timer.blocked_autorange(min_run_time=0.5)`
+  with identical inputs, changing only `full`.
+  Forward median (IQR): True 3.170 (0.060) ms, False 1.757 (0.027) ms.
+  Forward/backward median (IQR): True 3.953 (0.130) ms,
+  False 2.457 (0.018) ms.
+  This isolates `poisson_nll_loss`; it does not measure full-model speedups.

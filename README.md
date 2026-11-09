@@ -30,15 +30,18 @@ subclasses that omit `get_ell`.
 NaN observations contribute zero, and `reduce_neuron_dim=False` returns
 separate terms for each neuron with shape `(samples, trials, time, neurons)`.
 
-Normalization conventions are documented by each likelihood class.
+Use `get_ell(y, z, full=False)` to skip observation-only normalization work.
+The default `full=True` preserves the existing likelihood values.
 Every term depending on the latent states or trainable likelihood parameters
 must be retained, including parameter-dependent normalizers.
-Observation-only additive constants may be omitted if explicitly documented;
-omitting them preserves gradients but shifts absolute likelihood and ELBO values.
-The Gaussian and Bernoulli implementations retain all normalization terms.
-Poisson includes an approximate log-factorial term using PyTorch's Stirling
-approximation for counts greater than one.
-Account for these conventions when comparing absolute values across models.
+With `full=False`, Gaussian omits the constant half-log-two-pi term and Poisson
+skips the log-factorial computation; Bernoulli has no removable term.
+The Gaussian variance normalizer is retained in both modes, even for fixed variance.
+With `full=True`, Poisson uses PyTorch's Stirling approximation for counts
+greater than one, while Gaussian and Bernoulli are fully normalized.
+The modes have identical latent-state and parameter gradients, but can differ
+in observation gradients and absolute likelihood and ELBO values.
+Compare absolute values using the same convention and observation set.
 
 Some specialized smoothers have additional requirements.
 Coordinated dropout (`use_cd=True`) requires per-neuron log likelihoods through

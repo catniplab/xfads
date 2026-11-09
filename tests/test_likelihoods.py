@@ -1,3 +1,6 @@
+import math
+
+import pytest
 import torch
 
 from xfads.ssm_modules.likelihoods import PoissonLikelihood
@@ -45,25 +48,28 @@ def test_likelihood_requires_get_ell():
             likelihood_type()
 
 
-@pytest.mark.parametrize('likelihood_type', [
+@pytest.fixture(params=[
     GaussianLikelihood, PoissonLikelihood, BernoulliLikelihood,
 ])
-@pytest.mark.parametrize('shape', [(1, 1, 1), (3, 2, 4)])
-def test_builtin_likelihood_contract(likelihood_type, shape):
+def likelihood(request):
     torch.manual_seed(20261109)
     readout = nn.Linear(2, 3, dtype=torch.float64)
     with torch.no_grad():
         readout.weight.copy_(torch.linspace(-0.3, 0.4, 6).reshape(3, 2))
         readout.bias.copy_(torch.tensor([-0.2, 0.1, 0.3]))
 
-    if likelihood_type is GaussianLikelihood:
+    if request.param is GaussianLikelihood:
         variance = torch.tensor([0.3, 0.7, 1.4], dtype=torch.float64)
-        likelihood = likelihood_type(readout, 3, variance)
-    elif likelihood_type is PoissonLikelihood:
-        likelihood = likelihood_type(readout, 3, delta=0.02)
-    else:
-        likelihood = likelihood_type(readout, 3)
+        return request.param(readout, 3, variance)
+    if request.param is PoissonLikelihood:
+        return request.param(readout, 3, delta=0.02)
+    return request.param(readout, 3)
 
+
+@pytest.mark.parametrize('shape', [(1, 1, 1), (3, 2, 4)])
+@pytest.mark.parametrize('full', [False, True])
+def test_builtin_likelihood_contract(likelihood, shape, full):
+    readout = likelihood.readout_fn
     assert isinstance(likelihood, Likelihood)
     assert isinstance(likelihood, nn.Module)
     assert dict(likelihood.named_parameters())['readout_fn.weight'] is readout.weight
@@ -77,21 +83,25 @@ def test_builtin_likelihood_contract(likelihood_type, shape):
     z = torch.linspace(-0.8, 0.9, n_values, dtype=torch.float64)
     z = z.reshape(*shape, 2).requires_grad_()
     prediction = readout(z)
-    if likelihood_type is GaussianLikelihood:
+    if isinstance(likelihood, GaussianLikelihood):
+        variance = torch.tensor([0.3, 0.7, 1.4], dtype=torch.float64)
         reference = Normal(prediction, variance.sqrt())
-    elif likelihood_type is PoissonLikelihood:
+    elif isinstance(likelihood, PoissonLikelihood):
         reference = Poisson(likelihood.delta * prediction.exp())
     else:
         reference = Bernoulli(logits=prediction)
 
-    actual = likelihood.get_ell(y, z)
-    expected = reference.log_prob(y).sum(dim=-1)
+    actual = likelihood.get_ell(y, z, full=full)
+    expected_per_neuron = reference.log_prob(y)
+    if not full and isinstance(likelihood, GaussianLikelihood):
+        expected_per_neuron = expected_per_neuron + 0.5 * math.log(2 * math.pi)
+    expected = expected_per_neuron.sum(dim=-1)
     assert actual.shape == shape
     torch.testing.assert_close(actual, expected)
 
-    per_neuron = likelihood.get_ell(y, z, reduce_neuron_dim=False)
+    per_neuron = likelihood.get_ell(y, z, reduce_neuron_dim=False, full=full)
     assert per_neuron.shape == (*shape, 3)
-    torch.testing.assert_close(per_neuron, reference.log_prob(y))
+    torch.testing.assert_close(per_neuron, expected_per_neuron)
     torch.testing.assert_close(per_neuron.sum(dim=-1), actual)
 
     parameters = (z, *likelihood.parameters())
@@ -105,6 +115,59 @@ def test_builtin_likelihood_contract(likelihood_type, shape):
     parameter_gradients = dict(zip(parameters, actual_gradients))
     for parameter, expected_gradient in zip(reference_parameters, expected_gradients):
         torch.testing.assert_close(parameter_gradients[parameter], expected_gradient)
+
+
+@pytest.mark.parametrize('reduce_neuron_dim', [False, True])
+def test_full_flag_offsets_and_gradients_with_missing_data(likelihood, reduce_neuron_dim):
+    # Include an observed count above one, a missing neuron, and a missing bin.
+    values = [0.0, 1.0, 0.0] if isinstance(likelihood, BernoulliLikelihood) else [0.0, 2.0, 5.0]
+    y = torch.tensor(values, dtype=torch.float64).repeat(1, 3, 1)
+    y[:, 1, 1] = float('nan')
+    y[:, 2] = float('nan')
+    z = torch.linspace(-0.8, 0.9, 12, dtype=torch.float64).reshape(2, 1, 3, 2)
+    z.requires_grad_()
+    kwargs = dict(reduce_neuron_dim=reduce_neuron_dim)
+    full = likelihood.get_ell(y, z, full=True, **kwargs)
+    short = likelihood.get_ell(y, z, full=False, **kwargs)
+    torch.testing.assert_close(likelihood.get_ell(y, z, **kwargs), full, rtol=0, atol=0)
+
+    parameters = (z, *likelihood.parameters())
+    full_gradients = torch.autograd.grad(full.sum(), parameters)
+    short_gradients = torch.autograd.grad(short.sum(), parameters)
+    for full_gradient, short_gradient in zip(full_gradients, short_gradients):
+        assert torch.isfinite(short_gradient).all()
+        torch.testing.assert_close(full_gradient, short_gradient)
+
+    assert torch.isfinite(full).all() and torch.isfinite(short).all()
+    torch.testing.assert_close(full[:, :, 2], torch.zeros_like(full[:, :, 2]), rtol=0, atol=0)
+    torch.testing.assert_close(short[:, :, 2], torch.zeros_like(short[:, :, 2]), rtol=0, atol=0)
+    if not reduce_neuron_dim:
+        torch.testing.assert_close(short[:, :, 1, 1], torch.zeros_like(short[:, :, 1, 1]), rtol=0, atol=0)
+
+    obs = ~y.isnan()
+    if isinstance(likelihood, GaussianLikelihood):
+        offset = torch.full_like(y, 0.5 * math.log(2 * math.pi)) * obs
+    elif isinstance(likelihood, PoissonLikelihood):
+        # Check the returned data-only offset against PyTorch's documented
+        # Stirling term; the separate reference test checks the likelihood.
+        counts = torch.where(obs & (y > 1), y, 1.0)
+        offset = (counts * counts.log() - counts + 0.5 * (2 * math.pi * counts).log())
+        offset = torch.where(obs & (y > 1), offset, 0.0)
+    else:
+        offset = torch.zeros_like(y)
+    if reduce_neuron_dim:
+        offset = offset.sum(dim=-1)
+    torch.testing.assert_close(short - full, offset.expand_as(short))
+
+
+def test_gaussian_short_mode_retains_fixed_variance_normalizer():
+    variance = torch.tensor([0.3, 1.4], dtype=torch.float64)
+    likelihood = GaussianLikelihood(nn.Identity(), 2, variance, fix_R=True)
+    z = torch.tensor([[[[0.2, -0.4]]]], dtype=torch.float64, requires_grad=True)
+    y = torch.tensor([[[0.1, 0.8]]], dtype=torch.float64)
+    expected = Normal(z, variance.sqrt()).log_prob(y) + 0.5 * math.log(2 * math.pi)
+    actual = likelihood.get_ell(y, z, reduce_neuron_dim=False, full=False)
+    torch.testing.assert_close(actual, expected)
 
 
 def test_poisson_approximation_changes_only_observation_constant():
