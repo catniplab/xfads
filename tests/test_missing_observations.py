@@ -62,6 +62,9 @@ def test_trailing_padding_matches_unpadded(no_dropout_draws):
         torch.testing.assert_close(stats_p['kl'][:, :T_i], stats['kl'])
         torch.testing.assert_close(stats_p['kl'][:, T_i:], pad_kl, rtol=0, atol=1e-6)
 
+        if model_type == 'c':  # filter-only fitting
+            torch.testing.assert_close(seeded(ssm.forward_filter, y_pad, S)[0], seeded(ssm.forward_filter, y, S)[0])
+
 
 def test_interior_gap_carries_backward_state():
     ssm = make_model()
