@@ -8,7 +8,6 @@ from xfads.ssm_modules.dynamics import DenseGaussianInitialCondition
 from xfads.ssm_modules.encoders import LocalEncoderLRMvn, BackwardEncoderLRMvn, MaskedInputEncoder
 from xfads.ssm_modules.likelihoods import PoissonLikelihood, BernoulliLikelihood
 
-from xfads.decorators import *
 
 from xfads.smoothers.nonlinear_smoother import (
     NonlinearFilter as NonlinearFilterN,
@@ -62,7 +61,6 @@ def build_dynamics_fn(cfg, dynamics_type):
                          f"(use 'gru', 'linear', or 'diffusion')")
 
 
-@memory_cleanup
 def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_type='n', dynamics_type='gru'):
     H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
     readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs))
@@ -104,7 +102,6 @@ def create_xfads_poisson_log_link(cfg, n_neurons_obs, train_dataloader, model_ty
     return ssm
 
 
-@memory_cleanup
 def create_xfads_poisson_log_link_w_input(cfg, n_neurons_obs, n_inputs, train_dataloader, model_type='n', dynamics_type='gru'):
     H = utils.ReadoutLatentMask(cfg.n_latents, cfg.n_latents_read)
     readout_fn = nn.Sequential(H, nn.Linear(cfg.n_latents_read, n_neurons_obs))

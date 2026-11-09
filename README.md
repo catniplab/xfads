@@ -41,6 +41,9 @@ y = torch.nn.utils.rnn.pad_sequence(trials, batch_first=True, padding_value=floa
 ```
 A padded trial gives the same ELBO and posterior over its real bins as the unpadded trial. Missing entries are handled where observations enter, in `LocalEncoderLRMvn`, `BackwardEncoderLRMvn` and the Poisson, Bernoulli and Gaussian likelihoods, so this holds for every model built from them (`model_type='n'` and `'c'`, with or without inputs); the filter is unchanged. The local encoder still sees zeros for absent neurons in a partially observed bin.
 
+## GPU memory
+If training runs out of GPU memory, first set `PYTORCH_ALLOC_CONF=expandable_segments:True` in the environment: PyTorch's caching allocator then grows its memory segments in place, which avoids out-of-memory errors caused by fragmentation. If the model still does not fit, lower the batch size and keep the effective batch with Lightning's `Trainer(accumulate_grad_batches=k)`; the `BatchSizeFinder` callback finds the largest batch that fits.
+
 ## Installation
 1. Install miniconda or anaconda
 This is just to leverage `conda` for managing the Python environment. You can still use the IDE or code editor of your choice.
