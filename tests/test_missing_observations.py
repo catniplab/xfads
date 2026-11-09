@@ -1,4 +1,6 @@
 """Missing observations marked as NaN (#37): padding, dropped bins, absent neurons."""
+import math
+
 import pytest
 import torch
 from omegaconf import OmegaConf
@@ -140,5 +142,9 @@ def test_fully_observed_matches_main():
     torch.manual_seed(SEED)
     loss, _, _ = ssm(y, S, p_mask_y_in=0.2, p_mask_a=0.3, p_mask_b=0.2, p_mask_apb=0.1)
     next_draw = torch.randn(()).item()
-    assert loss.item() == pytest.approx(MAIN_LOSS, rel=1e-6)
+    # d5ccf5d's loss included Stirling's log(y!) (Poisson full=True), a constant in every parameter
+    # that the likelihood now omits; per trial, the loss sums over bins and neurons
+    y_safe = torch.where(y > 1, y, 2.)
+    stirling = torch.where(y > 1, y_safe * y_safe.log() - y_safe + 0.5 * (2 * math.pi * y_safe).log(), 0.)
+    assert loss.item() == pytest.approx(MAIN_LOSS - stirling.sum((1, 2)).mean().item(), rel=1e-6)
     assert next_draw == MAIN_NEXT_DRAW
