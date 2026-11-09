@@ -51,7 +51,8 @@ class Likelihood(nn.Module, ABC):
             Set True to include these terms for absolute likelihood reporting.
             Every term depending on latent states or trainable likelihood
             parameters is retained in both modes.
-            The concrete likelihood documents any approximation in full mode.
+            The built-in likelihoods return normalized log probabilities or
+            densities in full mode.
 
         Returns
         -------
@@ -129,14 +130,13 @@ class GaussianLikelihood(Likelihood):
 
 @apply_memory_cleanup
 class PoissonLikelihood(Likelihood):
-    """Poisson log mass with an optional approximate log-factorial term.
+    """Poisson log mass with an optional exact log-factorial term.
 
-    ``full=True`` includes the observation-only log-factorial term through
-    ``poisson_nll_loss(full=True)``: zero for counts zero and one, and a
-    Stirling approximation for larger counts.
-    Consequently, full-mode values approximate the fully normalized log mass.
-    The default ``full=False`` skips computing this term by forwarding the
-    flag to PyTorch.
+    ``full=True`` includes the observation-only log-factorial term using
+    ``torch.lgamma(y + 1)``, matching ``torch.distributions.Poisson.log_prob``.
+    The default ``full=False`` skips computing this term.
+    Both modes use ``poisson_nll_loss(full=False)``; PyTorch's approximate
+    full-mode factorial term is not used.
     ``delta`` is the bin duration; the readout produces log rates per unit time.
     ``reduce_neuron_dim=False`` preserves the final neuron dimension.
     """

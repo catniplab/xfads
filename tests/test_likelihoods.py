@@ -2,8 +2,17 @@ import math
 
 import pytest
 import torch
+from torch import nn
+from torch.distributions import Bernoulli, Normal, Poisson
 
-from xfads.ssm_modules.likelihoods import PoissonLikelihood
+from xfads.prob_utils import bits_per_spike
+# The public interface must import without preloading xfads.utils.
+from xfads.ssm_modules.likelihoods import (
+    BernoulliLikelihood,
+    GaussianLikelihood,
+    Likelihood,
+    PoissonLikelihood,
+)
 
 
 def test_poisson_ell_omits_log_factorial_and_has_finite_data_gradient():
@@ -27,17 +36,6 @@ def test_poisson_ell_full_is_exact_log_pmf():
     torch.testing.assert_close(ell, torch.distributions.Poisson(eta.exp()).log_prob(y.detach()))
     ell.sum().backward()
     assert torch.isfinite(y.grad).all()
-import pytest
-from torch import nn
-from torch.distributions import Bernoulli, Normal, Poisson
-
-from xfads.prob_utils import bits_per_spike
-from xfads.ssm_modules.likelihoods import (
-    BernoulliLikelihood,
-    GaussianLikelihood,
-    Likelihood,
-    PoissonLikelihood,
-)
 
 
 def test_likelihood_requires_get_ell():
@@ -75,8 +73,8 @@ def test_builtin_likelihood_contract(likelihood, shape, full):
     assert isinstance(likelihood, nn.Module)
     assert dict(likelihood.named_parameters())['readout_fn.weight'] is readout.weight
 
-    # Zero/one counts make Poisson's factorial term exact, avoiding the
-    # documented Stirling approximation for larger counts.
+    # Binary observations are shared across all three likelihood families;
+    # the dedicated Poisson tests also cover larger counts.
     n_samples, n_trials, n_time_bins = shape
     y = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float64)
     y = y.expand(n_trials, n_time_bins, 3)
@@ -149,11 +147,10 @@ def test_full_flag_offsets_and_gradients_with_missing_data(likelihood, reduce_ne
     if isinstance(likelihood, GaussianLikelihood):
         offset = torch.full_like(y, 0.5 * math.log(2 * math.pi)) * obs
     elif isinstance(likelihood, PoissonLikelihood):
-        # Check the returned data-only offset against PyTorch's documented
-        # Stirling term; the separate reference test checks the likelihood.
-        counts = torch.where(obs & (y > 1), y, 1.0)
-        offset = (counts * counts.log() - counts + 0.5 * (2 * math.pi * counts).log())
-        offset = torch.where(obs & (y > 1), offset, 0.0)
+        # Check the exact data-only offset; the separate reference test
+        # checks the likelihood against torch.distributions.
+        counts = torch.where(obs, y, 0.0)
+        offset = torch.lgamma(counts + 1)
     else:
         offset = torch.zeros_like(y)
     if reduce_neuron_dim:
@@ -171,7 +168,7 @@ def test_gaussian_short_mode_retains_fixed_variance_normalizer():
     torch.testing.assert_close(actual, expected)
 
 
-def test_poisson_approximation_changes_only_observation_constant():
+def test_poisson_full_matches_distribution_at_multiple_latent_states():
     likelihood = PoissonLikelihood(nn.Identity(), 1, delta=0.02)
     y = torch.tensor([[[2.0]]], dtype=torch.float64)
     z = torch.tensor([-0.7, 1.3], dtype=torch.float64).reshape(2, 1, 1, 1)
@@ -179,9 +176,7 @@ def test_poisson_approximation_changes_only_observation_constant():
 
     actual = likelihood.get_ell(y, z, full=True)
     expected = Poisson(likelihood.delta * z.exp()).log_prob(y).sum(dim=-1)
-    offsets = actual - expected
-    assert (offsets > 0).all()
-    torch.testing.assert_close(offsets[0], offsets[1])
+    torch.testing.assert_close(actual, expected)
     actual_gradient, = torch.autograd.grad(actual.sum(), z)
     expected_gradient, = torch.autograd.grad(expected.sum(), z)
     torch.testing.assert_close(actual_gradient, expected_gradient)

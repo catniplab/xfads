@@ -94,3 +94,22 @@
   observation constant from the original recorded baseline.
   The original RNG expectation and tolerance remain unchanged.
   `git diff --check` passed.
+
+## 2026-11-09: Stack the interface PR on PR #39
+
+- Memming approved making PR #41 build on PR #39, keeping the Poisson
+  numerical implementation in #39 and the shared interface work in #41.
+- Rebased the interface branch onto `origin/fix/poisson-drop-log-factorial`
+  (87c2ea3), retaining its Poisson constructor and `get_ell` implementation,
+  both original Poisson regression tests, and golden-loss adjustment.
+- Updated the describing documentation and interface tests to use #39's
+  exact `torch.lgamma(y + 1)` full-mode normalization rather than Stirling.
+- Retained the base class, Gaussian/Bernoulli interface consistency, BPS
+  optimization, and circular-import fix as the additional scope of #41.
+- All 30 combined tests passed with the shared environment.
+  AST comparisons confirmed that both Poisson methods and both inherited
+  regression tests match #39 exactly; the golden-loss test has no diff.
+  `git diff --check origin/fix/poisson-drop-log-factorial` passed.
+- The earlier kernel benchmark is historical: it compared PyTorch's Stirling
+  full mode against skipping that work, not #39's exact full-mode implementation.
+  Removed that performance claim from the current stacked PR description.

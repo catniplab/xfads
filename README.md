@@ -38,8 +38,8 @@ must be retained, including parameter-dependent normalizers.
 With `full=False`, Gaussian omits the constant half-log-two-pi term and Poisson
 skips the log-factorial computation; Bernoulli has no removable term.
 The Gaussian variance normalizer is retained in both modes, even for fixed variance.
-With `full=True`, Poisson uses PyTorch's Stirling approximation for counts
-greater than one, while Gaussian and Bernoulli are fully normalized.
+With `full=True`, all three likelihoods are fully normalized.
+Poisson includes the exact log-factorial term using `torch.lgamma(y + 1)`.
 The modes have identical latent-state and parameter gradients, but can differ
 in observation gradients and absolute likelihood and ELBO values.
 Compare absolute values using the same convention and observation set.
