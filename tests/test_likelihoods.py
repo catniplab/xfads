@@ -14,3 +14,14 @@ def test_poisson_ell_omits_log_factorial_and_has_finite_data_gradient():
     torch.testing.assert_close(ell, y.detach() * eta - eta.exp())
     ell.sum().backward()
     torch.testing.assert_close(y.grad, eta[0])
+
+
+def test_poisson_ell_full_is_exact_log_pmf():
+    # full=True adds the exact -log(y!), not torch's Stirling approximation
+    lik = PoissonLikelihood(torch.nn.Identity(), n_neurons=4, delta=1.0)
+    y = torch.tensor([0., 1., 2., 5.], requires_grad=True)
+    eta = torch.tensor([[0.3, -0.2, 0.1, 1.0]])
+    ell = lik.get_ell(y, eta, reduce_neuron_dim=False, full=True)
+    torch.testing.assert_close(ell, torch.distributions.Poisson(eta.exp()).log_prob(y.detach()))
+    ell.sum().backward()
+    assert torch.isfinite(y.grad).all()

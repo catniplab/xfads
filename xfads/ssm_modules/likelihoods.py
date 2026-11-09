@@ -44,15 +44,20 @@ class PoissonLikelihood(nn.Module):
         self.n_neurons = n_neurons
         self.readout_fn = readout_fn
 
-    def get_ell(self, y, z, reduce_neuron_dim=True):
+    def get_ell(self, y, z, reduce_neuron_dim=True, full=False):
         # missing entries (NaN) add no term; their predictions are replaced before any arithmetic,
         # so an overflow there cannot turn into NaN (inf * 0) in the loss or its gradient
         obs = ~y.isnan()
+        y = torch.where(obs, y, 0.)
         log_exp = torch.where(obs, math.log(self.delta) + self.readout_fn(z), 0.) # C @ z
         # keep full=False when training: -log(y!) is constant in every parameter, so gradients and
-        # bits/spike do not change; full=True adds Stirling's approximation of it, whose backward is
-        # NaN w.r.t. y (only y) at y = 0
-        log_p_y = -torch.nn.functional.poisson_nll_loss(log_exp, torch.where(obs, y, 0.), full=False, reduction='none') * obs
+        # bits/spike do not change. full=True adds the exact -log(y!) for reporting a normalized
+        # log-likelihood; torch's own full=True would use Stirling's approximation, inexact and with
+        # a NaN backward w.r.t. y (only y) at y = 0
+        log_p_y = -torch.nn.functional.poisson_nll_loss(log_exp, y, full=False, reduction='none')
+        if full:
+            log_p_y = log_p_y - torch.lgamma(y + 1)
+        log_p_y = log_p_y * obs
 
         if reduce_neuron_dim:
             return log_p_y.sum(dim=-1)
