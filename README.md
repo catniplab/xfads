@@ -30,8 +30,9 @@ subclasses that omit `get_ell`.
 NaN observations contribute zero, and `reduce_neuron_dim=False` returns
 separate terms for each neuron with shape `(samples, trials, time, neurons)`.
 
-Use `get_ell(y, z, full=False)` to skip observation-only normalization work.
-The default `full=True` preserves the existing likelihood values.
+`get_ell(y, z)` defaults to `full=False`, skipping observation-only
+normalization work during training.
+Use `get_ell(y, z, full=True)` when the normalization terms are needed.
 Every term depending on the latent states or trainable likelihood parameters
 must be retained, including parameter-dependent normalizers.
 With `full=False`, Gaussian omits the constant half-log-two-pi term and Poisson
@@ -42,6 +43,11 @@ greater than one, while Gaussian and Bernoulli are fully normalized.
 The modes have identical latent-state and parameter gradients, but can differ
 in observation gradients and absolute likelihood and ELBO values.
 Compare absolute values using the same convention and observation set.
+Bits per spike subtracts the model and null log likelihoods on the same counts,
+so their observation-only normalization terms cancel.
+The BPS calculation skips these terms in both likelihoods.
+Raw training and validation losses shift by a data-dependent constant relative
+to earlier runs; parameter gradients and reported BPS are unchanged.
 
 Some specialized smoothers have additional requirements.
 Coordinated dropout (`use_cd=True`) requires per-neuron log likelihoods through

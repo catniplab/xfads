@@ -72,3 +72,25 @@
   Forward/backward median (IQR): True 3.953 (0.130) ms,
   False 2.457 (0.018) ms.
   This isolates `poisson_nll_loss`; it does not measure full-model speedups.
+
+## 2026-11-09: Default to unnormalized training likelihoods
+
+- Memming requested `full=False` by default because optimization and reported
+  BPS do not require observation-only normalization terms.
+- Verified that `bits_per_spike` subtracts model and null NLLs evaluated on
+  the same counts; their log-factorial terms cancel.
+- Updated the describing documentation before switching defaults and
+  disabling the redundant normalization computation in BPS.
+  Raw losses shift by the omitted data-dependent constant; latent and
+  parameter gradients, posterior samples, and BPS retain their meaning.
+- Switched the abstract and three concrete methods to `full=False` and
+  disabled normalization in both model and null BPS computations.
+  `full=True` remains available for absolute-likelihood reporting, with the
+  existing documented Stirling approximation for Poisson.
+- All 28 tests passed, including float32/float64 BPS value and prediction
+  gradient comparisons with the former full-mode calculation, with an
+  always-silent neuron included.
+- Updated the golden-loss test by subtracting only the omitted, trial-averaged
+  observation constant from the original recorded baseline.
+  The original RNG expectation and tolerance remain unchanged.
+  `git diff --check` passed.

@@ -31,6 +31,7 @@ import pytest
 from torch import nn
 from torch.distributions import Bernoulli, Normal, Poisson
 
+from xfads.prob_utils import bits_per_spike
 from xfads.ssm_modules.likelihoods import (
     BernoulliLikelihood,
     GaussianLikelihood,
@@ -129,7 +130,7 @@ def test_full_flag_offsets_and_gradients_with_missing_data(likelihood, reduce_ne
     kwargs = dict(reduce_neuron_dim=reduce_neuron_dim)
     full = likelihood.get_ell(y, z, full=True, **kwargs)
     short = likelihood.get_ell(y, z, full=False, **kwargs)
-    torch.testing.assert_close(likelihood.get_ell(y, z, **kwargs), full, rtol=0, atol=0)
+    torch.testing.assert_close(likelihood.get_ell(y, z, **kwargs), short, rtol=0, atol=0)
 
     parameters = (z, *likelihood.parameters())
     full_gradients = torch.autograd.grad(full.sum(), parameters)
@@ -176,11 +177,32 @@ def test_poisson_approximation_changes_only_observation_constant():
     z = torch.tensor([-0.7, 1.3], dtype=torch.float64).reshape(2, 1, 1, 1)
     z.requires_grad_()
 
-    actual = likelihood.get_ell(y, z)
+    actual = likelihood.get_ell(y, z, full=True)
     expected = Poisson(likelihood.delta * z.exp()).log_prob(y).sum(dim=-1)
     offsets = actual - expected
     assert (offsets > 0).all()
     torch.testing.assert_close(offsets[0], offsets[1])
     actual_gradient, = torch.autograd.grad(actual.sum(), z)
     expected_gradient, = torch.autograd.grad(expected.sum(), z)
+    torch.testing.assert_close(actual_gradient, expected_gradient)
+
+
+@pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
+def test_bits_per_spike_matches_full_likelihood_difference(dtype):
+    y = torch.tensor([[[0., 2., 0.], [1., 0., 0.]],
+                      [[5., 1., 0.], [0., 3., 0.]]], dtype=dtype)
+    log_rates = torch.linspace(-2.0, 0.7, y.numel(), dtype=dtype).reshape_as(y)
+    log_rates.requires_grad_()
+
+    # Reproduce the former metric, including its linear-rate null model.
+    nll_model = torch.nn.functional.poisson_nll_loss(log_rates, y, full=True, reduction='sum')
+    nll_null = torch.nn.functional.poisson_nll_loss(
+        y.mean(dim=(0, 1), keepdim=True), y, log_input=False, full=True, reduction='sum',
+    )
+    expected = (nll_null - nll_model) / y.sum() / math.log(2)
+    actual = bits_per_spike(log_rates, y)
+    torch.testing.assert_close(actual, expected)
+
+    actual_gradient, = torch.autograd.grad(actual, log_rates)
+    expected_gradient, = torch.autograd.grad(expected, log_rates)
     torch.testing.assert_close(actual_gradient, expected_gradient)
