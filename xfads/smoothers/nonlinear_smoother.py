@@ -89,7 +89,7 @@ class LowRankNonlinearStateSpaceModel(nn.Module):
         k_y = t_mask_a[..., None] * k_y
         K_y = t_mask_a[..., None, None] * K_y
 
-        k_b, K_b = self.backward_encoder(k_y, K_y)
+        k_b, K_b = self.backward_encoder(k_y, K_y, ~y.isnan().all(-1))  # skip bins with no observation
         k_b = t_mask_b[..., None] * k_b
         K_b = t_mask_b[..., None, None] * K_b
 
@@ -232,7 +232,7 @@ class LrSSMcoBPSallEncoder(LowRankNonlinearStateSpaceModel):
         k_y = t_mask_a[..., None] * k_y
         K_y = t_mask_a[..., None, None] * K_y
 
-        k_b, K_b = self.backward_encoder(k_y, K_y)
+        k_b, K_b = self.backward_encoder(k_y, K_y, ~y.isnan().all(-1))  # skip bins with no observation
         k_b = t_mask_b[..., None] * k_b
         K_b = t_mask_b[..., None, None] * K_b
 
@@ -280,7 +280,8 @@ class LrSSMcoBPSallEncoder(LowRankNonlinearStateSpaceModel):
                 p_mask_y_in: float=0.0):
 
         n_neurons_heldout = self.n_neurons_obs - self.n_neurons_enc
-        y_heldout = torch.zeros((y_enc.shape[0], y_enc.shape[1], n_neurons_heldout), device=y_enc.device)
+        # held-out neurons are missing (NaN): the encoder reads them as 0, and padded bins of y_enc stay empty
+        y_heldout = torch.full((y_enc.shape[0], y_enc.shape[1], n_neurons_heldout), float('nan'), device=y_enc.device)
         y_input = torch.cat([y_enc / (1 - p_mask_y_in), y_heldout], dim=-1)
         z_s, stats = self.fast_smooth_1_to_T(y_input, n_samples, get_kl=True)
 

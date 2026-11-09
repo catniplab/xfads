@@ -34,6 +34,13 @@ There are several parameters that can be configured to trade off expressivity/sp
 
 Setting `p_mask_a` is equivalent to masking *actual* observations, $y_t$; this strategy was used in the context of structured VAE's for linear dynamical systems in [Zhao, and Linderman. 2023](https://arxiv.org/abs/2305.16543) \[5\] to promote learning dynamics more adept at prediction (and thus generating more realistic data).  Setting `p_mask_b` is equivalent to masking `pseudo` observations, $\tilde{y}_t$ -- this helps to regularize both the local/backward encoders required.
 
+## Missing observations and variable-length trials
+Mark missing entries of `y` as `NaN`: padding, dropped time bins, or neurons absent at some bins. A missing entry adds no likelihood term. A bin with no observation gets no local update: the causal filter (`fast_filter_1_to_T`) takes a predict-only step there, while the smoother keeps the backward update from later observations, carried through the gap by the backward encoder. Batch trials of different lengths by padding them at the end:
+```python
+y = torch.nn.utils.rnn.pad_sequence(trials, batch_first=True, padding_value=float('nan'))
+```
+A padded trial gives the same ELBO and posterior over its real bins as the unpadded trial. Missing entries are handled where observations enter, in `LocalEncoderLRMvn`, `BackwardEncoderLRMvn` and the Poisson, Bernoulli and Gaussian likelihoods, so this holds for every model built from them (`model_type='n'` and `'c'`, with or without inputs); the filter is unchanged. The local encoder still sees zeros for absent neurons in a partially observed bin.
+
 ## Installation
 1. Install miniconda or anaconda
 This is just to leverage `conda` for managing the Python environment. You can still use the IDE or code editor of your choice.
