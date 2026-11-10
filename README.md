@@ -14,10 +14,24 @@ Specification of a LowRankNonlinearStateSpaceModel requires:
 
 1. dynamics_mod: a nn.Module with a `mean_fn` attribute that specifies $m_{\theta}(\cdot)$ (e.g. some neural network function) 
 2. initial_c_pdf: a nn.Module that specifies the initial mean, $m_0$, and initial state-noise $Q_0$
-3. likelihood_pdf: a nn.Module that implements a `get_ell(y, z)` method that returns $\log p_{\psi}(y|z)$
+3. likelihood_pdf: a [`Likelihood`](xfads/ssm_modules/likelihoods.py) module that implements a `get_ell(y, z)` method that returns $\log p_{\psi}(y|z)$
 4. local_encoder: a nn.Module whose `forward` function maps time-instantaneous observations, $y_t$, to a natural parameter update, $\alpha_t$
 5. backward_encoder: a nn.Module whose `forward` function maps sequences of local natural parameter updates, $\alpha_{1:T}$, to backward natural parameter updates, $\beta_{1:T}$
 6. nl_filter: a nn.Module whose forward method takes natural parameter representation of observations, $\tilde{\lambda}_{1:T}$, and performs approximate posterior inference for the specified nonlinear dynamical system
+
+To implement a custom observation model, inherit from `Likelihood`, call
+`super().__init__()` in its constructor, and implement
+`get_ell(y, z, reduce_neuron_dim=True, full=False)`;
+callers pass the last two arguments by keyword.
+The [`Likelihood`](xfads/ssm_modules/likelihoods.py) docstring is the contract:
+shapes, missing (NaN) observations, per-neuron output, the `full`
+normalization convention, and what some smoothers and trainers need beyond it.
+
+Training uses the default `full=False`, which skips observation-only terms
+such as the Poisson log(y!).
+Raw training and validation losses therefore shift by a data-dependent
+constant relative to earlier runs; parameter gradients and bits per spike
+are unchanged.
 
 ## Parameter descriptions
 There are several parameters that can be configured to trade off expressivity/speed/generalization properties of the model and inference algorithm that we detail below.  Some are specific to the case of neural data modeled using a Poisson observation model with log-linear readout of the latent state.

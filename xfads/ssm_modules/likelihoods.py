@@ -1,11 +1,111 @@
 import math
+from abc import ABC, abstractmethod
+
 import torch
 import torch.nn as nn
 import xfads.utils as utils
 import torch.nn.functional as Fn
 
 
-class GaussianLikelihood(nn.Module):
+class Likelihood(nn.Module, ABC):
+    """Observation likelihood interface consumed by the XFADS smoothers.
+
+    Subclasses implement :meth:`get_ell` and register trainable parameters,
+    buffers, and readout modules through the usual ``nn.Module`` mechanisms.
+    Call ``super().__init__()`` in subclass constructors.
+    Smoothers call ``get_ell`` directly; implementing ``forward`` is not required.
+
+    This interface describes the common likelihood operation only.
+    Some smoothers and trainers require more:
+
+    - Coordinated dropout (``use_cd=True`` in ``LrSSMcoBPSheldinEncoder``)
+      calls ``get_ell(y, z, reduce_neuron_dim=False)``.
+    - ``LrSSMcoBPSheldinEncoder`` and ``LrSSMcoBPSallEncoder`` regularize
+      ``readout_fn[-1].weight``. Their ``predict``, and the
+      ``LightningMonkeyReaching`` and ``LightningDMFCRSG`` trainers, read
+      ``delta`` and ``readout_fn``, taking ``readout_fn(z)`` as log rates per
+      unit time and ``delta`` as the bin duration, as ``PoissonLikelihood`` does.
+    """
+
+    @abstractmethod
+    def get_ell(self, y: torch.Tensor, z: torch.Tensor,
+                reduce_neuron_dim: bool = True,
+                full: bool = False) -> torch.Tensor:
+        """Evaluate observation log likelihoods at the supplied latent states.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Observations with shape ``(n_trials, n_time_bins, n_neurons)``.
+            Values must belong to the observation model's support.
+            NaN entries denote missing observations and contribute zero.
+        z : torch.Tensor
+            Latent samples with shape
+            ``(n_samples, n_trials, n_time_bins, n_latents)``.
+            The readout must preserve the leading dimensions and produce
+            ``n_neurons`` observation parameters per latent state.
+            Observations are broadcast over the leading sample dimension.
+            Inputs and module parameters must have compatible devices and
+            dtypes.
+        reduce_neuron_dim : bool, optional
+            Sum over neurons when True (the default).
+            When False, return separate terms for each neuron, as required
+            by coordinated dropout.
+        full : bool, optional
+            Skip observation-only normalization work when False (the default).
+            Set True to include these terms for absolute likelihood reporting.
+            Every term depending on latent states or trainable likelihood
+            parameters is retained in both modes.
+            The built-in likelihoods return normalized log probabilities or
+            densities in full mode.
+
+        Returns
+        -------
+        torch.Tensor
+            Conditional log likelihoods with shape
+            ``(n_samples, n_trials, n_time_bins)`` when summing over neurons,
+            or ``(n_samples, n_trials, n_time_bins, n_neurons)`` otherwise.
+            Keep sample, trial, and time dimensions intact, including when
+            their size is one.
+            Return log likelihoods, rather than negative log likelihoods.
+            Preserve the autograd graph with respect to latent states and
+            trainable likelihood parameters.
+
+        Notes
+        -----
+        Despite the name, this method evaluates each supplied latent sample;
+        it does not compute an expectation or draw additional samples.
+        Smoothers compute the Monte Carlo expectation by averaging dimension 0.
+        No averaging over trials or summation over time is performed here.
+
+        Normalization convention: retain every term that depends on ``z`` or
+        any trainable likelihood parameter, including parameter-dependent
+        normalizers.
+        With ``full=False``, omit only additive terms depending on ``y`` and
+        fixed constants, and document the omitted terms in each implementation.
+        Omitting these terms preserves gradients with respect to latent states
+        and trainable likelihood parameters, but shifts likelihood
+        and ELBO values; the returned value is then not a normalized log
+        probability or density and may not be comparable across models.
+        Gradients with respect to observations can differ between modes.
+        """
+        raise NotImplementedError
+
+
+class GaussianLikelihood(Likelihood):
+    """Diagonal Gaussian log density with optional constant normalization.
+
+    ``full=True`` includes all normalization terms.
+    The default ``full=False`` omits the constant half-log-two-pi term per
+    observed neuron.
+    The variance-dependent normalizer is retained even when variance is fixed.
+    ``R_diag`` specifies observation variances, not standard deviations.
+    With ``fix_R=True`` they stay in the ``R_diag`` buffer, which follows
+    ``.to()``, ``.double()`` and ``load_state_dict``; otherwise they are
+    learned as ``softplus(log_R)``.
+    ``reduce_neuron_dim=False`` preserves the final neuron dimension.
+    """
+
     def __init__(self, readout_fn, n_neurons, R_diag, device='cpu', fix_R=False):
         super(GaussianLikelihood, self).__init__()
 
@@ -14,17 +114,24 @@ class GaussianLikelihood(nn.Module):
 
         if fix_R:
             self.register_buffer('R_diag', R_diag)
-            self.log_R = utils.softplus_inv(R_diag)
+            self.log_R = None
         else:
             self.log_R = torch.nn.Parameter(utils.softplus_inv(R_diag))
 
-    def get_ell(self, y, z, reduce_neuron_dim=True):
+    def get_R(self):
+        """Observation variances, with the shape of ``R_diag``."""
+        return self.R_diag if self.log_R is None else Fn.softplus(self.log_R)
+
+    def get_ell(self, y, z, reduce_neuron_dim=True, full=False):
         # missing entries (NaN) add no term; their predictions are replaced before any arithmetic,
         # so an overflow there cannot turn into NaN (inf * 0) in the loss or its gradient
         obs = ~y.isnan()
         mean = torch.where(obs, self.readout_fn(z), 0.)
-        cov = Fn.softplus(self.log_R)
-        log_prob = -0.5 * ((torch.where(obs, y, 0.) - mean)**2 / cov + torch.log(cov) + math.log(2 * math.pi)) * obs
+        cov = self.get_R()
+        log_prob = (torch.where(obs, y, 0.) - mean)**2 / cov + torch.log(cov)
+        if full:
+            log_prob = log_prob + math.log(2 * math.pi)
+        log_prob = -0.5 * log_prob * obs
 
         if reduce_neuron_dim:
             return log_prob.sum(dim=-1)
@@ -32,7 +139,18 @@ class GaussianLikelihood(nn.Module):
             return log_prob
 
 
-class PoissonLikelihood(nn.Module):
+class PoissonLikelihood(Likelihood):
+    """Poisson log mass with an optional exact log-factorial term.
+
+    ``full=True`` includes the observation-only log-factorial term using
+    ``torch.lgamma(y + 1)``, matching ``torch.distributions.Poisson.log_prob``.
+    The default ``full=False`` skips computing this term.
+    Both modes use ``poisson_nll_loss(full=False)``; PyTorch's approximate
+    full-mode factorial term is not used.
+    ``delta`` is the bin duration; the readout produces log rates per unit time.
+    ``reduce_neuron_dim=False`` preserves the final neuron dimension.
+    """
+
     def __init__(self, readout_fn, n_neurons, delta, device='cpu', p_mask=0.0):
         super(PoissonLikelihood, self).__init__()
         self.delta = delta
@@ -61,14 +179,22 @@ class PoissonLikelihood(nn.Module):
             return log_p_y
 
 
-class BernoulliLikelihood(nn.Module):
+class BernoulliLikelihood(Likelihood):
+    """Fully normalized Bernoulli log mass for binary observations.
+
+    The readout produces logits, and no normalization terms are omitted.
+    Binary observations have no removable observation-only term, so ``full``
+    has no effect on either values or computation.
+    ``reduce_neuron_dim=False`` preserves the final neuron dimension.
+    """
+
     def __init__(self, readout_fn, n_neurons, device='cpu', p_mask=0.0):
         super(BernoulliLikelihood, self).__init__()
         self.device = device
         self.n_neurons = n_neurons
         self.readout_fn = readout_fn
 
-    def get_ell(self, y, z, reduce_neuron_dim=True):
+    def get_ell(self, y, z, reduce_neuron_dim=True, full=False):
         obs = ~y.isnan()  # missing entries (NaN) add no term
         logits = self.readout_fn(z)
         y = torch.where(obs, y, 0.).expand([logits.shape[0]] + list(y.shape))

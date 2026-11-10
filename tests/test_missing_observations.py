@@ -6,7 +6,7 @@ import torch
 from omegaconf import OmegaConf
 
 from xfads.ssm_modules.prebuilt_models import create_xfads_poisson_log_link
-from xfads.ssm_modules.likelihoods import GaussianLikelihood, BernoulliLikelihood  # after xfads.utils: import cycle
+from xfads.ssm_modules.likelihoods import GaussianLikelihood, BernoulliLikelihood
 
 SEED = 20261109
 N, S = 6, 5  # neurons, samples
