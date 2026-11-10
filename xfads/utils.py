@@ -404,7 +404,7 @@ def get_latent_rotation(likelihood_pdf):
         C_scaled = readout_fn.weight / R.unsqueeze(-1).sqrt()
 
     elif isinstance(likelihood_pdf, GaussianLikelihood):
-        R = Fn.softplus(likelihood_pdf.log_R)
+        R = likelihood_pdf.get_R()
         C_scaled = readout_fn.weight / R.unsqueeze(-1).sqrt()
 
     U, S, VmT = torch.linalg.svd(C_scaled, full_matrices=False)

@@ -20,39 +20,18 @@ Specification of a LowRankNonlinearStateSpaceModel requires:
 6. nl_filter: a nn.Module whose forward method takes natural parameter representation of observations, $\tilde{\lambda}_{1:T}$, and performs approximate posterior inference for the specified nonlinear dynamical system
 
 To implement a custom observation model, inherit from `Likelihood`, call
-`super().__init__()` in its constructor, and implement `get_ell(y, z)`.
-For observations shaped `(trials, time, neurons)` and latent samples shaped
-`(samples, trials, time, latents)`, return `(samples, trials, time)` log
-likelihoods, summed over neurons and retaining gradients.
-The smoother averages over samples; `get_ell` does not.
-The base class documents the full contract and prevents instantiation of
-subclasses that omit `get_ell`.
-NaN observations contribute zero, and `reduce_neuron_dim=False` returns
-separate terms for each neuron with shape `(samples, trials, time, neurons)`.
+`super().__init__()` in its constructor, and implement
+`get_ell(y, z, reduce_neuron_dim=True, full=False)`;
+callers pass the last two arguments by keyword.
+The [`Likelihood`](xfads/ssm_modules/likelihoods.py) docstring is the contract:
+shapes, missing (NaN) observations, per-neuron output, the `full`
+normalization convention, and what some smoothers and trainers need beyond it.
 
-`get_ell(y, z)` defaults to `full=False`, skipping observation-only
-normalization work during training.
-Use `get_ell(y, z, full=True)` when the normalization terms are needed.
-Every term depending on the latent states or trainable likelihood parameters
-must be retained, including parameter-dependent normalizers.
-With `full=False`, Gaussian omits the constant half-log-two-pi term and Poisson
-skips the log-factorial computation; Bernoulli has no removable term.
-The Gaussian variance normalizer is retained in both modes, even for fixed variance.
-With `full=True`, all three likelihoods are fully normalized.
-Poisson includes the exact log-factorial term using `torch.lgamma(y + 1)`.
-The modes have identical latent-state and parameter gradients, but can differ
-in observation gradients and absolute likelihood and ELBO values.
-Compare absolute values using the same convention and observation set.
-Bits per spike subtracts the model and null log likelihoods on the same counts,
-so their observation-only normalization terms cancel.
-The BPS calculation skips these terms in both likelihoods.
-Raw training and validation losses shift by a data-dependent constant relative
-to earlier runs; parameter gradients and reported BPS are unchanged.
-
-Some specialized smoothers have additional requirements.
-Coordinated dropout (`use_cd=True`) requires per-neuron log likelihoods through
-`get_ell(y, z, reduce_neuron_dim=False)`.
-Some smoothers also access `readout_fn[-1].weight` for readout regularization.
+Training uses the default `full=False`, which skips observation-only terms
+such as the Poisson log(y!).
+Raw training and validation losses therefore shift by a data-dependent
+constant relative to earlier runs; parameter gradients and bits per spike
+are unchanged.
 
 ## Parameter descriptions
 There are several parameters that can be configured to trade off expressivity/speed/generalization properties of the model and inference algorithm that we detail below.  Some are specific to the case of neural data modeled using a Poisson observation model with log-linear readout of the latent state.

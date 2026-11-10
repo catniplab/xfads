@@ -167,6 +167,13 @@ def test_gaussian_short_mode_retains_fixed_variance_normalizer():
     actual = likelihood.get_ell(y, z, reduce_neuron_dim=False, full=False)
     torch.testing.assert_close(actual, expected)
 
+    # the fixed variance is module state: it follows dtype casts and checkpoints
+    assert likelihood.float().get_R().dtype == torch.float32
+    likelihood.double().load_state_dict({'R_diag': 4 * variance})
+    expected = Normal(z, (4 * variance).sqrt()).log_prob(y) + 0.5 * math.log(2 * math.pi)
+    actual = likelihood.get_ell(y, z, reduce_neuron_dim=False, full=False)
+    torch.testing.assert_close(actual, expected)
+
 
 def test_poisson_full_matches_distribution_at_multiple_latent_states():
     likelihood = PoissonLikelihood(nn.Identity(), 1, delta=0.02)

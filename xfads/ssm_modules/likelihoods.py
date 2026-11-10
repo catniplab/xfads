@@ -18,8 +18,15 @@ class Likelihood(nn.Module, ABC):
     Smoothers call ``get_ell`` directly; implementing ``forward`` is not required.
 
     This interface describes the common likelihood operation only.
-    Some specialized smoothers also require access to ``readout_fn``;
-    those requirements depend on the smoother being used.
+    Some smoothers and trainers require more:
+
+    - Coordinated dropout (``use_cd=True`` in ``LrSSMcoBPSheldinEncoder``)
+      calls ``get_ell(y, z, reduce_neuron_dim=False)``.
+    - ``LrSSMcoBPSheldinEncoder`` and ``LrSSMcoBPSallEncoder`` regularize
+      ``readout_fn[-1].weight``. Their ``predict``, and the
+      ``LightningMonkeyReaching`` and ``LightningDMFCRSG`` trainers, read
+      ``delta`` and ``readout_fn``, taking ``readout_fn(z)`` as log rates per
+      unit time and ``delta`` as the bin duration, as ``PoissonLikelihood`` does.
     """
 
     @abstractmethod
@@ -96,6 +103,9 @@ class GaussianLikelihood(Likelihood):
     observed neuron.
     The variance-dependent normalizer is retained even when variance is fixed.
     ``R_diag`` specifies observation variances, not standard deviations.
+    With ``fix_R=True`` they stay in the ``R_diag`` buffer, which follows
+    ``.to()``, ``.double()`` and ``load_state_dict``; otherwise they are
+    learned as ``softplus(log_R)``.
     ``reduce_neuron_dim=False`` preserves the final neuron dimension.
     """
 
@@ -107,16 +117,20 @@ class GaussianLikelihood(Likelihood):
 
         if fix_R:
             self.register_buffer('R_diag', R_diag)
-            self.log_R = utils.softplus_inv(R_diag)
+            self.log_R = None
         else:
             self.log_R = torch.nn.Parameter(utils.softplus_inv(R_diag))
+
+    def get_R(self):
+        """Observation variances, with the shape of ``R_diag``."""
+        return self.R_diag if self.log_R is None else Fn.softplus(self.log_R)
 
     def get_ell(self, y, z, reduce_neuron_dim=True, full=False):
         # missing entries (NaN) add no term; their predictions are replaced before any arithmetic,
         # so an overflow there cannot turn into NaN (inf * 0) in the loss or its gradient
         obs = ~y.isnan()
         mean = torch.where(obs, self.readout_fn(z), 0.)
-        cov = Fn.softplus(self.log_R)
+        cov = self.get_R()
         log_prob = (torch.where(obs, y, 0.) - mean)**2 / cov + torch.log(cov)
         if full:
             log_prob = log_prob + math.log(2 * math.pi)
