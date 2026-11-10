@@ -199,8 +199,10 @@ class BernoulliLikelihood(Likelihood):
         self.readout_fn = readout_fn
 
     def get_ell(self, y, z, reduce_neuron_dim=True, full=False):
-        obs = ~y.isnan()  # missing entries (NaN) add no term
-        logits = self.readout_fn(z)
+        # missing entries (NaN) add no term; their logits are replaced before any arithmetic,
+        # so an overflow there cannot turn into NaN (inf * 0) in the loss or its gradient
+        obs = ~y.isnan()
+        logits = torch.where(obs, self.readout_fn(z), 0.)
         y = torch.where(obs, y, 0.).expand([logits.shape[0]] + list(y.shape))
         log_p_y = -torch.nn.functional.binary_cross_entropy_with_logits(logits, y, reduction='none') * obs
 

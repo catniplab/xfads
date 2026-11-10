@@ -208,3 +208,37 @@ def test_bits_per_spike_matches_full_likelihood_difference(dtype):
     actual_gradient, = torch.autograd.grad(actual, log_rates)
     expected_gradient, = torch.autograd.grad(expected, log_rates)
     torch.testing.assert_close(actual_gradient, expected_gradient)
+
+
+def test_bits_per_spike_ignores_missing_counts():
+    y = torch.tensor([[[0., 2., 0.], [1., 0., 0.]],
+                      [[5., 1., 0.], [0., 3., 0.]]], dtype=torch.float64)
+    log_rates = torch.linspace(-2.0, 0.7, y.numel(), dtype=torch.float64).reshape_as(y)
+    expected = bits_per_spike(log_rates, y)
+
+    # trailing padding plus a neuron never observed, with overflowing rates at every missing entry
+    y_pad = torch.full((2, 4, 4), float('nan'), dtype=torch.float64)
+    y_pad[:, :2, :3] = y
+    log_rates_pad = torch.full_like(y_pad, float('inf'))
+    log_rates_pad[:, :2, :3] = log_rates
+    log_rates_pad.requires_grad_()
+    actual = bits_per_spike(log_rates_pad, y_pad)
+    torch.testing.assert_close(actual, expected)
+
+    gradient, = torch.autograd.grad(actual, log_rates_pad)
+    assert torch.isfinite(gradient).all() and (gradient[y_pad.isnan()] == 0).all()
+
+
+@pytest.mark.parametrize('make_likelihood', [
+    lambda: GaussianLikelihood(nn.Identity(), 2, torch.ones(2)),
+    lambda: PoissonLikelihood(nn.Identity(), 2, delta=1.0),
+    lambda: BernoulliLikelihood(nn.Identity(), 2),
+])
+def test_overflow_at_missing_entry_stays_out_of_ell(make_likelihood):
+    likelihood = make_likelihood()
+    y = torch.tensor([[[1., float('nan')]]])
+    z = torch.tensor([[[[0.5, float('inf')]]]], requires_grad=True)  # identity readout: overflow at the missing neuron
+    ell = likelihood.get_ell(y, z, reduce_neuron_dim=False)
+    assert torch.isfinite(ell).all() and ell[..., 1].item() == 0
+    gradient, = torch.autograd.grad(ell.sum(), z)
+    assert torch.isfinite(gradient).all() and gradient[..., 1].item() == 0
