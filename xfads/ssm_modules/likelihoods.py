@@ -6,8 +6,6 @@ import torch.nn as nn
 import xfads.utils as utils
 import torch.nn.functional as Fn
 
-from xfads.decorators import *
-
 
 class Likelihood(nn.Module, ABC):
     """Observation likelihood interface consumed by the XFADS smoothers.
@@ -94,7 +92,6 @@ class Likelihood(nn.Module, ABC):
         raise NotImplementedError
 
 
-@apply_memory_cleanup
 class GaussianLikelihood(Likelihood):
     """Diagonal Gaussian log density with optional constant normalization.
 
@@ -142,7 +139,6 @@ class GaussianLikelihood(Likelihood):
             return log_prob
 
 
-@apply_memory_cleanup
 class PoissonLikelihood(Likelihood):
     """Poisson log mass with an optional exact log-factorial term.
 
