@@ -147,3 +147,24 @@ buffer.
 - Missing-data gaps found in the same review (`bits_per_spike` NaN, Bernoulli
   inf logit at a missing entry) go to a separate PR stacked on this one.
 - All 30 tests passed with the shared environment.
+
+## 2026-11-10: Missing counts in bits per spike and Bernoulli
+
+- Branch `fix/missing-data-bps-bernoulli`, stacked on #41, which rewrites the
+  same `bits_per_spike` lines.
+- `bits_per_spike` summed NaN counts into both likelihoods, so any padded or
+  missing bin made every logged BPS NaN. Missing counts now add no term to
+  either likelihood or the spike count; each neuron's null rate is its mean
+  over observed bins. Rates are replaced at missing entries before arithmetic,
+  so an overflow there or a never-observed neuron (0 / 0) cannot produce NaN.
+  On fully observed data the result is bitwise identical to before
+  (float32 and float64, up to 256 x 35 x 137).
+- `BernoulliLikelihood` masked after `binary_cross_entropy_with_logits`, so an
+  infinite logit at a missing entry gave inf * 0 = NaN; logits are now
+  replaced first, as Gaussian and Poisson already did.
+- Two new tests: BPS with trailing padding, a never-observed neuron, and
+  infinite rates at every missing entry equals BPS on the unpadded counts, with
+  zero gradient at missing entries; an infinite readout at a missing neuron
+  stays out of the ell and its gradient for all three likelihoods. Both fail
+  on the previous code (Bernoulli only, for the second).
+- All 34 tests passed with the shared environment.

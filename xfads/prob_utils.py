@@ -36,16 +36,23 @@ def bits_per_spike(preds, targets):
     Preds are logrates and targets are binned spike counts.
     Observation-only log-factorial terms cancel between model and null
     likelihoods on the same counts, so neither computation includes them.
+    Missing counts (NaN) add no term to either likelihood or to the spike
+    count, and each neuron's null rate is its mean over observed bins.
     """
-    nll_model = poisson_nll_loss(preds, targets, full=False, reduction="sum")
+    obs = ~targets.isnan()
+    targets = torch.where(obs, targets, 0.)
+    null_rates = targets.sum(dim=(0, 1), keepdim=True) / obs.sum(dim=(0, 1), keepdim=True)
+    # rates are replaced at missing entries before any arithmetic, so an overflow there cannot turn
+    # into NaN (inf * 0); this also covers the 0 / 0 null rate of a neuron that is never observed
+    nll_model = poisson_nll_loss(torch.where(obs, preds, 0.), targets, full=False, reduction="none")
     nll_null = poisson_nll_loss(
-        torch.mean(targets, dim=(0, 1), keepdim=True),
+        torch.where(obs, null_rates, 0.),
         targets,
         log_input=False,
         full=False,
-        reduction="sum",
+        reduction="none",
     )
-    return (nll_null - nll_model) / torch.nansum(targets) / math.log(2)
+    return ((nll_null * obs).sum() - (nll_model * obs).sum()) / targets.sum() / math.log(2)
 
 
 def rts_smoother(m_p, P_p, m_f, P_f, F, n_samples=None):
